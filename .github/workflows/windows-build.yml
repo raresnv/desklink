@@ -1,0 +1,58 @@
+name: Windows source build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: 1.100.0
+          targets: x86_64-pc-windows-gnu
+          components: rustfmt
+      - name: Install Windows GNU compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+      - name: Check source formatting
+        run: cargo fmt --all -- --check
+      - name: Run protocol and identity tests
+        run: cargo test --locked --no-default-features
+      - name: Build Windows executable from this commit
+        run: cargo build --locked --release --target x86_64-pc-windows-gnu --bin desklink
+      - name: Validate architecture and embedded version
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, struct, tomllib
+          from pathlib import Path
+          root = Path('target/x86_64-pc-windows-gnu/release')
+          data = (root / 'desklink.exe').read_bytes()
+          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          assert data[:2] == b'MZ'
+          offset = struct.unpack_from('<I', data, 0x3c)[0]
+          assert data[offset:offset+4] == b'PE\0\0'
+          assert struct.unpack_from('<H', data, offset+4)[0] == 0x8664
+          assert version.encode('utf-16le') in data
+          assert 'DeskLink'.encode('utf-16le') in data
+          manifest = {'version': version, 'architecture': 'x64', 'source_commit': os.environ['GITHUB_SHA'], 'sha256': hashlib.sha256(data).hexdigest(), 'signing': 'unsigned source-build artifact; not a signed release'}
+          (root / 'unsigned-build.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - name: Retain unsigned source-build artifact for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desklink-windows-x64-unsigned
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/x86_64-pc-windows-gnu/release/desklink.exe
+            target/x86_64-pc-windows-gnu/release/unsigned-build.json

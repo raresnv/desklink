@@ -1,0 +1,44 @@
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: packaging/relay/Dockerfile
+    environment:
+      DESKLINK_RELAY_ACCESS_CODE: ${DESKLINK_RELAY_ACCESS_CODE:?Set a random relay access code of at least 32 characters}
+      DESKLINK_RELAY_PROXY_TOKEN: ${DESKLINK_RELAY_PROXY_TOKEN:?Set a separate random server-only proxy token of at least 32 characters}
+    volumes:
+      - device_directory:/data
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 2
+    pids_limit: 128
+    ulimits:
+      nofile: {soft: 4096, hard: 4096}
+    networks: [backend]
+  caddy:
+    image: caddy:2
+    environment:
+      DESKLINK_RELAY_DOMAIN: ${DESKLINK_RELAY_DOMAIN:?Set the public relay DNS name}
+      DESKLINK_RELAY_PROXY_TOKEN: ${DESKLINK_RELAY_PROXY_TOKEN:?Set a separate random server-only proxy token of at least 32 characters}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 128
+    networks: [edge, backend]
+networks:
+  backend:
+    internal: true
+  edge: {}
+volumes:
+  device_directory:
+  caddy_data:
+  caddy_config:

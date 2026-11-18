@@ -1,0 +1,12 @@
+.tools
+target
+dist
+.git
+.codex
+.agents
+*.log
+**/.env
+**/.env.*
+**/*.key
+**/*.p12
+**/*.pfx

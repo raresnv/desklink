@@ -1,0 +1,11 @@
+{$DESKLINK_RELAY_DOMAIN} {
+	@relay path /v1 /v2
+	reverse_proxy @relay relay:8080 {
+		header_up X-DeskLink-Proxy-Token {$DESKLINK_RELAY_PROXY_TOKEN}
+		header_up X-DeskLink-Client-IP {remote_host}
+		stream_timeout 2h
+	}
+	respond /healthz "ok" 200
+	respond "Not found" 404
+	# Deliberately no access log: do not record invitations or credentials.
+}

@@ -1,0 +1,59 @@
+{
+  "version": "0.3.1",
+  "channel": "public preview",
+  "date": "2026-11-18",
+  "production_ready": false,
+  "signing": {
+    "macos": "Development signed; distribution signing and Apple notarization pending.",
+    "windows": "Unsigned; publisher signing pending."
+  },
+  "packages": [
+    {
+      "id": "macos",
+      "platform": "macos",
+      "version": "0.3.1",
+      "architecture": "Apple Silicon / ARM64",
+      "format": "ZIP",
+      "bytes": 6628567,
+      "sha256": "00ecc2859000c98ab98243c230d068933a31861a296defd0f8205b18729cfa2a",
+      "executable_sha256": "6972e4c4006f4b024b65e5d4fd06740ea13cc62664c0d3ebe86d7bb6c8cc0095",
+      "url": "/downloads/0.3.1/DeskLink-0.3.1-macos-arm64.zip"
+    },
+    {
+      "id": "windows",
+      "platform": "windows",
+      "version": "0.3.1",
+      "architecture": "x64",
+      "format": "ZIP",
+      "bytes": 7183989,
+      "sha256": "3982086052913a9cb9b1630a3f75c495c5fcb33d172e03909abf6bc170336799",
+      "executable_sha256": "e2a1950c7806106d03cfa434a7496241d379360135a306927d201436c789feee",
+      "url": "/downloads/0.3.1/DeskLink-0.3.1-windows-x64.zip"
+    },
+    {
+      "id": "linux",
+      "platform": "linux",
+      "version": "0.3.1",
+      "architecture": "ARM64 / X11",
+      "format": "TAR.GZ",
+      "bytes": 8481218,
+      "sha256": "ca841d1b63833cdaf2053c61834d8e24056e592cc2a4c1a071daa2ffbeb9a130",
+      "executable_sha256": "5b166da00d8624a1cbf944e00e89a0925641c75db08af04d275fbfaf4e3b846e",
+      "url": "/downloads/0.3.1/DeskLink-0.3.1-linux-arm64.tar.gz"
+    }
+  ],
+  "additional_packages": [
+    {
+      "id": "windows-arm64",
+      "platform": "windows",
+      "version": "0.3.1",
+      "architecture": "ARM64",
+      "format": "ZIP",
+      "bytes": 6518274,
+      "sha256": "1ab29a6036a91cf6c92ed8f5939239fe88576519b30ce5fa6aaab39db632bbf4",
+      "executable_sha256": "cf09bf7e44e5dffbe3b56226866a34da2728790064d92606eb6030a31e661949",
+      "url": "/downloads/0.3.1/DeskLink-0.3.1-windows-arm64.zip",
+      "experimental": true
+    }
+  ]
+}

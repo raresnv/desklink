@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>DeskLink</string>
+  <key>CFBundleDisplayName</key><string>DeskLink</string>
+  <key>CFBundleExecutable</key><string>DeskLink</string>
+  <key>CFBundleIdentifier</key><string>dev.desklink.desktop</string>
+  <key>CFBundleVersion</key><string>8</string>
+  <key>CFBundleShortVersionString</key><string>0.3.2</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>DeskLink connects to a computer you choose on your local network for approved screen sharing and remote control.</string>
+  <key>NSScreenCaptureUsageDescription</key><string>DeskLink shares your selected display only after you approve a viewer.</string>
+  <key>LSMinimumSystemVersion</key><string>12.3</string>
+</dict></plist>
