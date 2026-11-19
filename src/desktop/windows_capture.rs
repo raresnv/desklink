@@ -53,6 +53,7 @@ impl Drop for Surface {
 }
 impl Surface {
     fn open_scaled(display: Display, bound: u32) -> Result<Self> {
+        Self::verify_monitor(&display)?;
         unsafe {
             let (width, height) =
                 scaled_dimensions(display.info.width, display.info.height, bound)?;
@@ -110,14 +111,14 @@ impl Surface {
             Ok(surface)
         }
     }
-    fn capture(&self) -> Result<&[u8]> {
+    fn verify_monitor(display: &Display) -> Result<()> {
         unsafe {
-            let d = &self.display.info;
+            let d = &display.info;
             let mut monitor = MONITORINFOEXW::default();
             monitor.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
             ensure!(
                 GetMonitorInfoW(
-                    HMONITOR(self.display.id as usize as *mut c_void),
+                    HMONITOR(display.id as usize as *mut c_void),
                     std::ptr::from_mut(&mut monitor).cast()
                 )
                 .as_bool(),
@@ -139,6 +140,14 @@ impl Surface {
                     && name == d.name,
                 "Display configuration changed; select the display and approve again"
             );
+            Ok(())
+        }
+    }
+
+    fn capture(&self) -> Result<&[u8]> {
+        Self::verify_monitor(&self.display)?;
+        unsafe {
+            let d = &self.display.info;
             ensure!(
                 StretchBlt(
                     self.memory,
@@ -157,6 +166,9 @@ impl Surface {
                 "Windows capture failed; protected desktops cannot be shared"
             );
             ensure!(GdiFlush().as_bool(), "Windows capture did not complete");
+            // GDI reads virtual desktop coordinates. Discard a frame if the
+            // selected monitor moved while the copy was in progress.
+            Self::verify_monitor(&self.display)?;
             Ok(std::slice::from_raw_parts(
                 self.pixels.cast(),
                 (self.stride * self.height) as usize,

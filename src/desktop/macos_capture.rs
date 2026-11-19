@@ -164,7 +164,8 @@ pub(super) struct ScreenCapture {
     mailbox: Arc<Mailbox>,
 }
 impl ScreenCapture {
-    pub fn open(id: u32, max_edge: u32) -> Result<Self> {
+    pub fn open(approved: &super::Display, max_edge: u32) -> Result<Self> {
+        let id = approved.id;
         let (tx, rx) = mpsc::sync_channel(1);
         let completion = RcBlock::new(
             move |content: *mut SCShareableContent, error: *mut NSError| {
@@ -193,6 +194,16 @@ impl ScreenCapture {
             .context("Display enumeration timed out")?
             .map_err(|error| anyhow!(error))?
             .0;
+        // SCDisplay is the actual stream source. Compare its snapshot in logical
+        // points before using display-mode pixels to size the encoded stream.
+        let bounds = unsafe { display.frame() };
+        let info = &approved.info;
+        ensure!(
+            (bounds.origin.x, bounds.origin.y) == (f64::from(info.x), f64::from(info.y))
+                && (bounds.size.width, bounds.size.height)
+                    == (f64::from(info.width), f64::from(info.height)),
+            "Display configuration changed; select the display and approve again"
+        );
         let mailbox = Arc::new(Mailbox::new(max_edge));
         let output: Retained<Output> =
             unsafe { msg_send![super(Output::alloc().set_ivars(mailbox.clone())), init] };

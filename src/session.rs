@@ -543,7 +543,7 @@ fn serve_host(
     // OS integrations are created only after local consent.
     let window = FrameWindow::for_peer(supports_video_settings);
     let initial_profile = window.profile();
-    let capturer = match Capturer::open_with_max_edge(display.id, initial_profile.max_edge()) {
+    let capturer = match Capturer::open_approved(display, initial_profile.max_edge()) {
         Ok(capturer) => capturer,
         Err(error) => {
             let _ = writer.send(&Message::Error(format!("{error:#}")));
@@ -601,12 +601,12 @@ fn serve_host(
     );
     let capture_stop = cancel.clone();
     let capture_outgoing = outgoing.clone();
-    let display_id = display.id;
+    let approved_display = display.clone();
     let capture_video = video.clone();
     let capture_thread = thread::spawn(move || {
         let result = (|| -> Result<()> {
             let mut edge = initial_profile.max_edge();
-            let mut capture = Capturer::open_with_max_edge(display_id, edge)?;
+            let mut capture = Capturer::open_approved(&approved_display, edge)?;
             while !capture_stop.stopped() {
                 let start = Instant::now();
                 let (profile, quality) = {
@@ -618,9 +618,13 @@ fn serve_host(
                 if profile.max_edge() != edge {
                     drop(capture);
                     edge = profile.max_edge();
-                    capture = Capturer::open_with_max_edge(display_id, edge)?;
+                    capture = Capturer::open_approved(&approved_display, edge)?;
                 }
-                if let Some(frame) = capture.frame_with_quality(quality)? {
+                // Revoke access before a failed stream waits for native teardown.
+                let frame = capture
+                    .frame_with_quality(quality)
+                    .inspect_err(|_| capture_stop.cancel())?;
+                if let Some(frame) = frame {
                     if let Ok(mut slot) = latest.lock() {
                         *slot = Some(frame);
                     }
@@ -631,11 +635,11 @@ fn serve_host(
             }
             Ok(())
         })();
-        if let Err(e) = result {
+        if let Err(e) = &result {
             let _ = capture_outgoing.try_send(Message::Error(format!("{e:#}")));
-            thread::sleep(Duration::from_millis(60));
             capture_stop.cancel();
         }
+        result
     });
     let result = read_host_messages(
         &mut reader,
@@ -649,7 +653,9 @@ fn serve_host(
     cancel.cancel();
     drop(input); // Release all held inputs before waiting on other workers.
     let _ = writer_thread.join();
-    let _ = capture_thread.join();
+    capture_thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("Capture worker stopped unexpectedly"))??;
     result
 }
 
@@ -664,6 +670,9 @@ fn read_host_messages(
 ) -> Result<()> {
     while !cancel.stopped() {
         let message = reader.receive()?;
+        if cancel.stopped() {
+            break;
+        }
         if matches!(message, Message::Input(_) | Message::VideoSettings(_))
             && !allows_viewer_command(&message, &policy, supports_video_settings)
         {

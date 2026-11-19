@@ -63,6 +63,11 @@ impl Duplication {
                     let desc = output.GetDesc()?;
                     let r = desc.DesktopCoordinates;
                     if desc.Monitor.0 as usize as u32 != display.id
+                        || !display.info.name.encode_utf16().eq(desc
+                            .DeviceName
+                            .iter()
+                            .copied()
+                            .take_while(|ch| *ch != 0))
                         || !desc.AttachedToDesktop.as_bool()
                         || r.left != display.info.x
                         || r.top != display.info.y
@@ -136,14 +141,14 @@ impl Duplication {
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource = None;
             match self.output.AcquireNextFrame(100, &mut info, &mut resource) {
-                Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
+                Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                    self.verify_monitor()?;
+                    return Ok(None);
+                }
                 result => result?,
             }
             let _acquired = Acquired(&self.output);
-            ensure!(
-                same_output(&self.approved, &self.monitor.GetDesc()?),
-                "Display configuration changed; select the display and approve again"
-            );
+            self.verify_monitor()?;
             let source = resource
                 .context("No duplicated frame")?
                 .cast::<ID3D11Texture2D>()?;
@@ -182,6 +187,14 @@ impl Duplication {
                 pixels,
             }))
         }
+    }
+    fn verify_monitor(&self) -> Result<()> {
+        let current = unsafe { self.monitor.GetDesc()? };
+        ensure!(
+            same_output(&self.approved, &current),
+            "Display configuration changed; select the display and approve again"
+        );
+        Ok(())
     }
 }
 

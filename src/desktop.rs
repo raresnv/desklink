@@ -18,30 +18,48 @@ pub struct Display {
     pub info: DesktopInfo,
 }
 
+impl Display {
+    fn from_monitor(monitor: &Monitor) -> Result<Self> {
+        let info = DesktopInfo {
+            name: monitor.name()?.chars().take(80).collect(),
+            width: monitor.width()?,
+            height: monitor.height()?,
+            x: monitor.x()?,
+            y: monitor.y()?,
+            // XCap's macOS bounds and Enigo's pointer coordinates both use
+            // logical points. Captured pixel dimensions can differ on Retina.
+            scale: 1.0,
+        };
+        info.validate()?;
+        Ok(Self {
+            id: monitor.id()?,
+            info,
+        })
+    }
+
+    fn verify_source(&self, current: &Display) -> Result<()> {
+        let approved = &self.info;
+        let info = &current.info;
+        ensure!(
+            self.id == current.id
+                && approved.name == info.name
+                && (approved.x, approved.y) == (info.x, info.y)
+                && (approved.width, approved.height) == (info.width, info.height)
+                && approved.scale == info.scale,
+            "Display configuration changed; select the display and approve again"
+        );
+        Ok(())
+    }
+}
+
 mod jpeg;
 pub mod permissions;
 
 pub fn displays() -> Result<Vec<Display>> {
     Monitor::all()
         .context("Could not list displays")?
-        .into_iter()
-        .map(|monitor| {
-            let info = DesktopInfo {
-                name: monitor.name()?.chars().take(80).collect(),
-                width: monitor.width()?,
-                height: monitor.height()?,
-                x: monitor.x()?,
-                y: monitor.y()?,
-                // XCap's macOS bounds and Enigo's pointer coordinates both use
-                // logical points. Captured pixel dimensions can differ on Retina.
-                scale: 1.0,
-            };
-            info.validate()?;
-            Ok(Display {
-                id: monitor.id()?,
-                info,
-            })
-        })
+        .iter()
+        .map(Display::from_monitor)
         .collect()
 }
 
@@ -58,6 +76,11 @@ fn validate_x11_source(width: u32, height: u32) -> Result<()> {
 /// pixel allocation between checking the dimensions and asking the X server.
 #[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
 pub fn capture_x11_monitor(monitor: &Monitor) -> Result<image::RgbaImage> {
+    capture_x11_region(monitor, monitor.width()?, monitor.height()?)
+}
+
+#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+fn capture_x11_region(monitor: &Monitor, width: u32, height: u32) -> Result<image::RgbaImage> {
     // Mirrors XCap's backend selection. Its Wayland portal may capture all
     // monitors even for a region request, which has no enforceable byte bound.
     let wayland = std::env::var_os("XDG_SESSION_TYPE").is_some_and(|v| v == "wayland")
@@ -67,7 +90,6 @@ pub fn capture_x11_monitor(monitor: &Monitor) -> Result<image::RgbaImage> {
         !wayland,
         "Bounded screen capture requires an X11 display session"
     );
-    let (width, height) = (monitor.width()?, monitor.height()?);
     validate_x11_source(width, height)?;
     let image = monitor
         .capture_region(0, 0, width, height)
@@ -80,8 +102,10 @@ pub fn capture_x11_monitor(monitor: &Monitor) -> Result<image::RgbaImage> {
 }
 
 pub struct Capturer {
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     monitor: Monitor,
+    #[cfg(not(target_os = "windows"))]
+    approved: Display,
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     max_edge: u32,
     #[cfg(target_os = "windows")]
@@ -94,33 +118,43 @@ impl Capturer {
         Self::open_with_max_edge(id, VideoProfile::Balanced.max_edge())
     }
     pub fn open_with_max_edge(id: u32, max_edge: u32) -> Result<Self> {
+        Self::open_selected(id, None, max_edge)
+    }
+
+    pub(crate) fn open_approved(display: &Display, max_edge: u32) -> Result<Self> {
+        Self::open_selected(display.id, Some(display), max_edge)
+    }
+
+    fn open_selected(id: u32, approved: Option<&Display>, max_edge: u32) -> Result<Self> {
         ensure!(
             (1..=MAX_FRAME_EDGE).contains(&max_edge),
             "Invalid frame edge limit"
         );
         check_capture_permission()?;
-        #[cfg(target_os = "macos")]
-        return Ok(Self {
-            capture: macos_capture::ScreenCapture::open(id, max_edge)?,
-        });
-        #[cfg(target_os = "windows")]
-        return Ok(Self {
-            capture: windows_capture::ScreenCapture::open(
-                displays()?
-                    .into_iter()
-                    .find(|d| d.id == id)
-                    .context("The selected display was disconnected")?,
-                max_edge,
-            )?,
-        });
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            let monitor = Monitor::all()?
-                .into_iter()
-                .find(|m| m.id().ok() == Some(id))
-                .context("The selected display was disconnected")?;
-            Ok(Self { monitor, max_edge })
-        }
+        let monitor = Monitor::all()?
+            .into_iter()
+            .find(|monitor| monitor.id().ok() == Some(id))
+            .context("The selected display was disconnected")?;
+        let current = Display::from_monitor(&monitor)?;
+        let approved = match approved {
+            Some(approved) => {
+                approved.verify_source(&current)?;
+                approved.clone()
+            }
+            None => current,
+        };
+        Ok(Self {
+            #[cfg(target_os = "macos")]
+            capture: macos_capture::ScreenCapture::open(&approved, max_edge)?,
+            #[cfg(target_os = "windows")]
+            capture: windows_capture::ScreenCapture::open(approved, max_edge)?,
+            #[cfg(not(target_os = "windows"))]
+            monitor,
+            #[cfg(not(target_os = "windows"))]
+            approved,
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            max_edge,
+        })
     }
 
     pub fn backend_name(&self) -> &'static str {
@@ -147,13 +181,26 @@ impl Capturer {
         #[cfg(not(target_os = "windows"))]
         {
             #[cfg(target_os = "macos")]
-            let image = match self.capture.frame(std::time::Duration::from_millis(100))? {
-                Some(frame) => frame,
-                None => return Ok(None), // A static desktop need not generate duplicate frames.
+            let image = {
+                let frame = self.capture.frame(std::time::Duration::from_millis(100))?;
+                self.approved
+                    .verify_source(&Display::from_monitor(&self.monitor)?)?;
+                match frame {
+                    Some(frame) => frame,
+                    None => return Ok(None), // A static desktop need not generate duplicate frames.
+                }
             };
             #[cfg(not(target_os = "macos"))]
             let image = {
-                let rgba = capture_x11_monitor(&self.monitor)?;
+                self.approved
+                    .verify_source(&Display::from_monitor(&self.monitor)?)?;
+                let rgba = capture_x11_region(
+                    &self.monitor,
+                    self.approved.info.width,
+                    self.approved.info.height,
+                )?;
+                self.approved
+                    .verify_source(&Display::from_monitor(&self.monitor)?)?;
                 let (width, height) =
                     crate::video::scaled_dimensions(rgba.width(), rgba.height(), self.max_edge)?;
                 let image = DynamicImage::ImageRgba8(rgba);
@@ -556,6 +603,54 @@ fn map_key(key: Key) -> Result<enigo::Key> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn approved_display() -> Display {
+        Display {
+            id: 7,
+            info: DesktopInfo {
+                name: "External".into(),
+                x: -1800,
+                y: 12,
+                width: 1800,
+                height: 1169,
+                scale: 1.0,
+            },
+        }
+    }
+
+    #[test]
+    fn approved_display_rejects_same_id_with_changed_origin() {
+        let approved = approved_display();
+        let mut current = approved.clone();
+        current.info.x = 0;
+        assert!(approved.verify_source(&current).is_err());
+        current = approved.clone();
+        current.info.y += 1;
+        assert!(approved.verify_source(&current).is_err());
+    }
+
+    #[test]
+    fn approved_display_rejects_same_id_with_changed_logical_size() {
+        let approved = approved_display();
+        let mut current = approved.clone();
+        current.info.width *= 2;
+        assert!(approved.verify_source(&current).is_err());
+        current = approved.clone();
+        current.info.height *= 2;
+        assert!(approved.verify_source(&current).is_err());
+    }
+
+    #[test]
+    fn approved_display_requires_the_original_identity() {
+        let approved = approved_display();
+        approved.verify_source(&approved).unwrap();
+        let mut current = approved.clone();
+        current.id += 1;
+        assert!(approved.verify_source(&current).is_err());
+        current.id = approved.id;
+        current.info.name = "Other".into();
+        assert!(approved.verify_source(&current).is_err());
+    }
 
     #[derive(Default)]
     struct WindowsTextKeyboard(Vec<String>);
