@@ -9,6 +9,7 @@ use crate::{
     relay::addressed::ConnectionOffer,
     relay::{self, RelayEndpoint},
     transport::{SecureConnection, SecureReader, SecureWriter},
+    video::VideoProfile,
     wire::{StopToken, Wire},
 };
 use anyhow::{bail, ensure, Context, Result};
@@ -77,7 +78,11 @@ pub enum HostEvent {
 #[derive(Debug)]
 pub enum ViewerEvent {
     Waiting,
-    Connected { desktop: DesktopInfo, control: bool },
+    Connected {
+        desktop: DesktopInfo,
+        control: bool,
+        supports_video_settings: bool,
+    },
     Latency(u64),
     Ended(SessionEnd),
 }
@@ -429,10 +434,16 @@ impl Viewer {
             *slot = Some(Arc::new(wake));
         }
     }
+    pub fn set_video_profile(&self, profile: VideoProfile) {
+        self.enqueue(Message::VideoSettings(profile));
+    }
     pub fn input(&self, event: InputEvent) {
+        self.enqueue(Message::Input(event));
+    }
+    fn enqueue(&self, message: Message) {
         // Fail closed on saturation: losing a release event must never leave
         // a key held on the host.
-        if self.outgoing.try_send(Message::Input(event)).is_err() {
+        if self.outgoing.try_send(message).is_err() {
             self.cancel.cancel();
         }
     }
@@ -482,6 +493,7 @@ fn serve_host(
     cancel: &Cancellation,
     pin: Option<PeerPin>,
 ) -> Result<()> {
+    let supports_video_settings = secure.supports_video_settings();
     let (mut reader, mut writer) = secure.split()?;
     let Message::Request {
         name,
@@ -529,7 +541,9 @@ fn serve_host(
         pin.remember()?;
     }
     // OS integrations are created only after local consent.
-    let capturer = match Capturer::open(display.id) {
+    let window = FrameWindow::for_peer(supports_video_settings);
+    let initial_profile = window.profile();
+    let capturer = match Capturer::open_with_max_edge(display.id, initial_profile.max_edge()) {
         Ok(capturer) => capturer,
         Err(error) => {
             let _ = writer.send(&Message::Error(format!("{error:#}")));
@@ -540,7 +554,7 @@ fn serve_host(
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             ensure!(!cancel.stopped(), "Session cancelled");
-            if let Some(frame) = capturer.frame()? {
+            if let Some(frame) = capturer.frame_with_quality(window.quality())? {
                 return Ok(frame);
             }
             ensure!(Instant::now() < deadline, "No screen frames arrived");
@@ -568,7 +582,7 @@ fn serve_host(
         desktop: display.info.clone(),
         control: policy.can_control(),
     })?;
-    let video = Arc::new(Mutex::new(FrameWindow::default()));
+    let video = Arc::new(Mutex::new(window));
     let ticket = video.lock().unwrap().reserve().unwrap();
     writer.send(&first_frame)?;
     writer.send(&Message::Ping(ticket))?;
@@ -591,13 +605,21 @@ fn serve_host(
     let capture_video = video.clone();
     let capture_thread = thread::spawn(move || {
         let result = (|| -> Result<()> {
-            let capture = Capturer::open(display_id)?;
+            let mut edge = initial_profile.max_edge();
+            let mut capture = Capturer::open_with_max_edge(display_id, edge)?;
             while !capture_stop.stopped() {
                 let start = Instant::now();
-                let quality = capture_video
-                    .lock()
-                    .map(|window| window.quality())
-                    .unwrap_or(60);
+                let (profile, quality) = {
+                    let window = capture_video
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("Video state unavailable"))?;
+                    (window.profile(), window.quality())
+                };
+                if profile.max_edge() != edge {
+                    drop(capture);
+                    edge = profile.max_edge();
+                    capture = Capturer::open_with_max_edge(display_id, edge)?;
+                }
                 if let Some(frame) = capture.frame_with_quality(quality)? {
                     if let Ok(mut slot) = latest.lock() {
                         *slot = Some(frame);
@@ -615,7 +637,15 @@ fn serve_host(
             capture_stop.cancel();
         }
     });
-    let result = read_host_messages(&mut reader, &outgoing, &mut input, policy, cancel, &video);
+    let result = read_host_messages(
+        &mut reader,
+        &outgoing,
+        &mut input,
+        policy,
+        supports_video_settings,
+        cancel,
+        &video,
+    );
     cancel.cancel();
     drop(input); // Release all held inputs before waiting on other workers.
     let _ = writer_thread.join();
@@ -628,17 +658,29 @@ fn read_host_messages(
     outgoing: &SyncSender<Message>,
     input: &mut Option<InputController>,
     policy: AccessPolicy,
+    supports_video_settings: bool,
     cancel: &Cancellation,
     video: &Arc<Mutex<FrameWindow>>,
 ) -> Result<()> {
     while !cancel.stopped() {
-        match reader.receive()? {
-            Message::Input(event) if policy.can_control() => {
+        let message = reader.receive()?;
+        if matches!(message, Message::Input(_) | Message::VideoSettings(_))
+            && !allows_viewer_command(&message, &policy, supports_video_settings)
+        {
+            continue;
+        }
+        match message {
+            Message::Input(event) => {
                 if let Some(input) = input.as_mut() {
                     input.apply(event)?;
                 }
             }
-            Message::Input(_) => {} // A view-only peer can never escalate control.
+            Message::VideoSettings(profile) => {
+                video
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("Video state unavailable"))?
+                    .set_profile(profile);
+            }
             Message::Ping(value) => {
                 outgoing
                     .try_send(Message::Pong(value))
@@ -654,6 +696,18 @@ fn read_host_messages(
         }
     }
     Ok(())
+}
+
+fn allows_viewer_command(
+    message: &Message,
+    policy: &AccessPolicy,
+    supports_video_settings: bool,
+) -> bool {
+    match message {
+        Message::Input(_) => policy.can_control(),
+        Message::VideoSettings(_) => policy.can_view() && supports_video_settings,
+        _ => false,
+    }
 }
 
 enum ViewerTarget {
@@ -715,6 +769,7 @@ fn viewer_peer(
             )
         }
     };
+    let supports_video_settings = secure.supports_video_settings();
     let (mut reader, mut writer) = secure.split()?;
     writer.send(&Message::Request {
         name,
@@ -728,7 +783,11 @@ fn viewer_peer(
             if let Some(pin) = &pin {
                 pin.remember()?;
             }
-            let _ = events.try_send(ViewerEvent::Connected { desktop, control });
+            let _ = events.try_send(ViewerEvent::Connected {
+                desktop,
+                control,
+                supports_video_settings,
+            });
             control
         }
         Message::Denied(reason) | Message::Error(reason) => bail!("{reason}"),
@@ -743,13 +802,17 @@ fn viewer_peer(
         cancel.clone(),
         None,
     );
-    // Forward UI input through the same single writer as heartbeat replies.
+    let mut policy = AccessPolicy::default();
+    policy.approve(control);
+    // Forward permitted UI commands through the same single writer as heartbeat replies.
     let forward_stop = cancel.clone();
     let forward_outgoing = outgoing.clone();
     let forward_thread = thread::spawn(move || {
         while !forward_stop.stopped() {
             match incoming.recv_timeout(Duration::from_millis(50)) {
-                Ok(message) if control => {
+                Ok(message)
+                    if allows_viewer_command(&message, &policy, supports_video_settings) =>
+                {
                     if forward_outgoing.try_send(message).is_err() {
                         forward_stop.cancel();
                     }
@@ -870,6 +933,23 @@ fn now_millis() -> u64 {
 mod tests {
     use super::*;
     #[test]
+    fn viewer_commands_require_matching_approval_and_capability() {
+        let settings = Message::VideoSettings(crate::video::VideoProfile::Original);
+        let input = Message::Input(InputEvent::ReleaseAll);
+        let mut policy = AccessPolicy::default();
+        assert!(!allows_viewer_command(&settings, &policy, true));
+        assert!(!allows_viewer_command(&input, &policy, true));
+        policy.approve(false);
+        assert!(allows_viewer_command(&settings, &policy, true));
+        assert!(!allows_viewer_command(&settings, &policy, false));
+        assert!(!allows_viewer_command(&input, &policy, true));
+        policy.approve(true);
+        assert!(allows_viewer_command(&input, &policy, false));
+        assert!(!allows_viewer_command(&Message::Disconnect, &policy, true));
+        assert!(!allows_viewer_command(&Message::Ping(5), &policy, true));
+    }
+
+    #[test]
     fn writer_keeps_control_live_while_video_waits_for_a_decode_fence() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -884,7 +964,7 @@ mod tests {
         let (mut peer, _) = secure.split().unwrap();
         let (_reader, writer) = received.recv().unwrap();
         accept.join().unwrap();
-        let window = Arc::new(Mutex::new(FrameWindow::default()));
+        let window = Arc::new(Mutex::new(FrameWindow::for_peer(false)));
         let ticket = window.lock().unwrap().reserve().unwrap();
         while window.lock().unwrap().reserve().is_some() {}
         let latest = Arc::new(Mutex::new(Some(Message::Frame {
@@ -926,7 +1006,7 @@ mod tests {
 
     #[test]
     fn video_window_bounds_frames_until_the_receiver_acknowledges() {
-        let mut window = FrameWindow::default();
+        let mut window = FrameWindow::for_peer(false);
         let a = window.reserve().unwrap();
         let b = window.reserve().unwrap();
         let c = window.reserve().unwrap();

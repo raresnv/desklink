@@ -9,6 +9,7 @@ use crate::{
     protocol::DesktopInfo,
     relay::{DeviceEvent, DevicePresence, RelayEndpoint},
     session::{Decision, Host, HostEvent, Viewer, ViewerEvent},
+    video::VideoProfile,
 };
 use eframe::egui::{self, TextureHandle};
 use std::{
@@ -47,6 +48,9 @@ pub struct DeskLinkApp {
     remote: Option<DesktopInfo>,
     allowed_control: bool,
     control_enabled: bool,
+    supports_video_settings: bool,
+    video_profile: VideoProfile,
+    zoom: remote::Zoom,
     input: remote::RemoteInput,
     texture: Option<TextureHandle>,
     status: Option<(String, bool)>,
@@ -105,6 +109,9 @@ impl DeskLinkApp {
             remote: None,
             allowed_control: false,
             control_enabled: false,
+            supports_video_settings: false,
+            video_profile: VideoProfile::default(),
+            zoom: remote::Zoom::Fit,
             input: remote::RemoteInput::default(),
             texture: None,
             status,
@@ -372,7 +379,17 @@ impl DeskLinkApp {
                 ViewerEvent::Waiting => {
                     self.viewer_status = "Waiting for the host to approve…".into()
                 }
-                ViewerEvent::Connected { desktop, control } => {
+                ViewerEvent::Connected {
+                    desktop,
+                    control,
+                    supports_video_settings,
+                } => {
+                    self.supports_video_settings = supports_video_settings;
+                    if supports_video_settings {
+                        if let Some(viewer) = &self.viewer {
+                            viewer.set_video_profile(self.video_profile);
+                        }
+                    }
                     self.remote = Some(desktop);
                     self.allowed_control = control;
                     self.control_enabled = control;
@@ -424,6 +441,7 @@ impl DeskLinkApp {
         self.texture = None;
         self.connected_at = None;
         self.control_enabled = false;
+        self.supports_video_settings = false;
         self.allowed_control = false;
         self.input = remote::RemoteInput::default();
         self.viewer_status.clear();

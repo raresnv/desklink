@@ -2,9 +2,16 @@ use super::{theme, DeskLinkApp};
 use crate::{
     protocol::{InputEvent, Key, MouseButton},
     session::Viewer,
+    video::VideoProfile,
 };
-use eframe::egui::{self, Color32, Event, Modifiers, RichText};
+use eframe::egui::{self, emath::GuiRounding, Color32, Event, Modifiers, RichText};
 use std::collections::HashSet;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Zoom {
+    Fit,
+    Native,
+}
 
 #[derive(Default)]
 pub(super) struct RemoteInput {
@@ -13,11 +20,14 @@ pub(super) struct RemoteInput {
     modifiers: HashSet<Key>,
     buttons: HashSet<MouseButton>,
     wheel: egui::Vec2,
+    pointer: Option<egui::Pos2>,
 }
 
 impl DeskLinkApp {
     pub(super) fn remote_view(&mut self, ctx: &egui::Context) {
         let mut disconnect = false;
+        let old_profile = self.video_profile;
+        let old_zoom = self.zoom;
         egui::TopBottomPanel::top("session-toolbar")
             .frame(egui::Frame::new().fill(Color32::WHITE).inner_margin(14.0))
             .show(ctx, |ui| {
@@ -43,7 +53,33 @@ impl DeskLinkApp {
                         }
                     });
                 });
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Quality");
+                    ui.add_enabled_ui(self.supports_video_settings, |ui| {
+                        if self.supports_video_settings {
+                            let profiles = [VideoProfile::Balanced, VideoProfile::Sharp, VideoProfile::Original];
+                            for profile in profiles {
+                                let response = ui.selectable_value(
+                                    &mut self.video_profile,
+                                    profile,
+                                    profile.label(),
+                                );
+                                if profile == VideoProfile::Original {
+                                    response.on_hover_text("Up to 4096 pixels on the long edge. Uses more bandwidth and may lower the frame rate.");
+                                }
+                            }
+                        } else {
+                            let _ = ui.selectable_label(true, "Balanced · legacy host");
+                        }
+                    });
+                    ui.separator();
+                    ui.label("Zoom");
+                    ui.selectable_value(&mut self.zoom, Zoom::Fit, "Fit");
+                    ui.selectable_value(&mut self.zoom, Zoom::Native, "100%");
+                });
             });
+        let profile_changed = old_profile != self.video_profile;
         egui::TopBottomPanel::bottom("session-status")
             .frame(egui::Frame::new().fill(Color32::WHITE).inner_margin(10.0))
             .show(ctx, |ui| {
@@ -62,9 +98,17 @@ impl DeskLinkApp {
                             .connected_at
                             .map(|t| t.elapsed().as_secs())
                             .unwrap_or(0);
+                        let dimensions = self
+                            .texture
+                            .as_ref()
+                            .map(|texture| {
+                                let [width, height] = texture.size();
+                                format!("{width} × {height}  ·  ")
+                            })
+                            .unwrap_or_default();
                         ui.label(
                             RichText::new(format!(
-                                "{}:{:02}  ·  {} fps  ·  {} ms  ·  {} KB/frame",
+                                "{dimensions}{}:{:02}  ·  {} fps  ·  {} ms  ·  {} KB/frame",
                                 seconds / 60,
                                 seconds % 60,
                                 self.fps,
@@ -86,59 +130,32 @@ impl DeskLinkApp {
             )
             .show(ctx, |ui| {
                 if let Some(texture) = &self.texture {
-                    let available = ui.available_size();
-                    let texture_size = texture.size_vec2();
-                    let scale = (available.x / texture_size.x).min(available.y / texture_size.y);
-                    let size = texture_size * scale;
-                    let rect = egui::Rect::from_center_size(ui.max_rect().center(), size);
-                    let response = ui.put(
-                        rect,
-                        egui::Image::new((texture.id(), texture_size))
-                            .fit_to_exact_size(size)
-                            .sense(egui::Sense::click_and_drag()),
-                    );
-                    focus_remote_screen(&response);
-                    // Letterbox and toolbar clicks always release keyboard focus.
-                    let click_outside = ctx.input(|i| {
-                        i.pointer.any_pressed()
-                            && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
-                    });
-                    let release_shortcut = ctx.input_mut(|input| {
-                        input.consume_shortcut(&egui::KeyboardShortcut::new(
-                            Modifiers::CTRL | Modifiers::ALT,
-                            egui::Key::Escape,
-                        ))
-                    });
-                    if click_outside || release_shortcut {
-                        response.surrender_focus();
-                    }
-                    let focused = self.control_enabled
-                        && self.allowed_control
-                        && response.has_focus()
-                        && ctx.input(|i| i.focused)
-                        && self.pending.is_none();
-                    if let Some(viewer) = &self.viewer {
-                        if focused {
-                            lock_remote_keyboard(ctx, &response);
-                            self.input.active = true;
-                            self.input.forward(ctx, rect, |event| viewer.input(event));
-                        } else {
-                            self.input.release(viewer);
+                    show_screen(ui, texture, self.zoom, |ui, response, visible| {
+                        let enabled = self.control_enabled
+                            && self.allowed_control
+                            && self.pending.is_none()
+                            && !profile_changed
+                            && old_zoom == self.zoom;
+                        if let Some(viewer) = &self.viewer {
+                            self.input
+                                .interact(response, visible, enabled, |event| viewer.input(event));
                         }
-                    }
-                    if self.control_enabled && !response.has_focus() {
-                        let label_rect =
-                            egui::Rect::from_center_size(rect.center(), egui::vec2(220.0, 38.0));
-                        ui.painter()
-                            .rect_filled(label_rect, 7.0, Color32::from_black_alpha(190));
-                        ui.painter().text(
-                            label_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "Click to control this screen",
-                            egui::FontId::proportional(14.0),
-                            Color32::WHITE,
-                        );
-                    }
+                        if self.control_enabled && !response.has_focus() && visible.is_positive() {
+                            let label_rect = egui::Rect::from_center_size(
+                                visible.center(),
+                                egui::vec2(220.0, 38.0),
+                            );
+                            let painter = ui.painter().with_clip_rect(visible);
+                            painter.rect_filled(label_rect, 7.0, Color32::from_black_alpha(190));
+                            painter.text(
+                                label_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "Click to control this screen",
+                                egui::FontId::proportional(14.0),
+                                Color32::WHITE,
+                            );
+                        }
+                    });
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.label(
@@ -148,13 +165,105 @@ impl DeskLinkApp {
                     });
                 }
             });
+        if profile_changed {
+            if let Some(viewer) = &self.viewer {
+                self.input.release(viewer);
+                viewer.set_video_profile(self.video_profile);
+            }
+        }
         if disconnect {
             self.end_viewer();
         }
     }
 }
 
+fn show_screen(
+    ui: &mut egui::Ui,
+    texture: &egui::TextureHandle,
+    zoom: Zoom,
+    interact: impl FnOnce(&mut egui::Ui, &egui::Response, egui::Rect),
+) {
+    let pixels = texture.size_vec2();
+    let draw = |ui: &mut egui::Ui, rect: egui::Rect, viewport: egui::Rect| {
+        let clip = ui.clip_rect().intersect(viewport);
+        ui.set_clip_rect(clip);
+        let id = ui.advance_cursor_after_rect(rect);
+        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+        ui.painter().image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        interact(ui, &response, rect.intersect(clip));
+    };
+    match zoom {
+        Zoom::Fit => {
+            let viewport = ui.available_rect_before_wrap();
+            let scale = (viewport.width() / pixels.x).min(viewport.height() / pixels.y);
+            let rect = egui::Rect::from_center_size(viewport.center(), pixels * scale);
+            draw(ui, rect, viewport);
+        }
+        Zoom::Native => {
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+            egui::ScrollArea::both()
+                .id_salt("remote-pixels")
+                .auto_shrink([false, false])
+                .drag_to_scroll(false)
+                .show_viewport(ui, |ui, viewport| {
+                    let origin = ui.max_rect().min;
+                    let size = pixels / ui.ctx().pixels_per_point();
+                    let padding = (viewport.size() - size).max(egui::Vec2::ZERO) * 0.5;
+                    let min = (origin + padding).round_to_pixels(ui.ctx().pixels_per_point());
+                    draw(
+                        ui,
+                        egui::Rect::from_min_size(min, size),
+                        viewport.translate(origin.to_vec2()),
+                    );
+                });
+        }
+    }
+}
+
 impl RemoteInput {
+    fn interact(
+        &mut self,
+        response: &egui::Response,
+        visible: egui::Rect,
+        enabled: bool,
+        emit: impl FnMut(InputEvent),
+    ) {
+        let ctx = &response.ctx;
+        focus_remote_screen(response);
+        let outside = ctx.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(event, Event::PointerButton { pos, pressed: true, .. } if !visible.contains(*pos))
+            })
+        });
+        let shortcut = ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL | Modifiers::ALT,
+                egui::Key::Escape,
+            ))
+        });
+        if !enabled || outside || shortcut || !ctx.input(|i| i.focused) {
+            response.surrender_focus();
+        }
+        if response.has_focus() {
+            lock_remote_keyboard(ctx, response);
+            self.active = true;
+            // egui 0.31 consumes the smoothed wheel delta when ScrollArea ends.
+            // Remote input uses the original wheel events; leave the scrollbars interactive.
+            ctx.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+            self.forward(ctx, response.rect, visible, emit);
+            if !self.active {
+                response.surrender_focus();
+            }
+        } else {
+            self.release_to(emit);
+        }
+    }
+
     pub(super) fn release(&mut self, viewer: &Viewer) {
         self.release_to(|event| viewer.input(event));
     }
@@ -184,16 +293,25 @@ impl RemoteInput {
         }
     }
 
-    fn forward(&mut self, ctx: &egui::Context, rect: egui::Rect, mut emit: impl FnMut(InputEvent)) {
-        let (events, modifiers, pointer) =
-            ctx.input(|i| (i.events.clone(), i.modifiers, i.pointer.hover_pos()));
+    fn forward(
+        &mut self,
+        ctx: &egui::Context,
+        rect: egui::Rect,
+        visible: egui::Rect,
+        mut emit: impl FnMut(InputEvent),
+    ) {
+        let (events, modifiers) = ctx.input(|i| (i.events.clone(), i.modifiers));
+        let movement = |pos: egui::Pos2| InputEvent::Move {
+            x: ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0),
+            y: ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0),
+        };
         for event in events {
             match event {
-                Event::PointerMoved(pos) if rect.contains(pos) || !self.buttons.is_empty() => {
-                    emit(InputEvent::Move {
-                        x: (pos.x - rect.left()) / rect.width(),
-                        y: (pos.y - rect.top()) / rect.height(),
-                    });
+                Event::PointerMoved(pos) => {
+                    self.pointer = Some(pos);
+                    if visible.contains(pos) || !self.buttons.is_empty() {
+                        emit(movement(pos));
+                    }
                 }
                 Event::PointerButton {
                     pos,
@@ -201,15 +319,13 @@ impl RemoteInput {
                     pressed,
                     modifiers,
                 } => {
+                    self.pointer = Some(pos);
                     if let Some(button) = map_button(button) {
-                        if (pressed && rect.contains(pos))
+                        if (pressed && visible.contains(pos))
                             || (!pressed && self.buttons.contains(&button))
                         {
                             self.sync_modifiers(&mut emit, modifiers);
-                            emit(InputEvent::Move {
-                                x: (pos.x - rect.left()) / rect.width(),
-                                y: (pos.y - rect.top()) / rect.height(),
-                            });
+                            emit(movement(pos));
                             emit(InputEvent::Button {
                                 button,
                                 down: pressed,
@@ -283,7 +399,7 @@ impl RemoteInput {
                     delta,
                     unit,
                     modifiers,
-                } if pointer.is_some_and(|p| rect.contains(p)) => {
+                } if self.pointer.is_some_and(|p| visible.contains(p)) => {
                     self.sync_modifiers(&mut emit, modifiers);
                     let multiplier = match unit {
                         egui::MouseWheelUnit::Point => 1.0 / 30.0,
@@ -416,6 +532,7 @@ mod tests {
             |ctx| {
                 input.forward(
                     ctx,
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 100.0)),
                     egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 100.0)),
                     |event| sent.push(event),
                 );
@@ -679,3 +796,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod viewport_tests;

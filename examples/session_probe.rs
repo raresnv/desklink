@@ -48,7 +48,9 @@ fn main() -> Result<()> {
         for event in viewer.events.try_iter() {
             match event {
                 ViewerEvent::Waiting => println!("Waiting for local approval"),
-                ViewerEvent::Connected { desktop, control } => {
+                ViewerEvent::Connected {
+                    desktop, control, ..
+                } => {
                     println!("Connected: {desktop:?}; control={control}")
                 }
                 ViewerEvent::Ended(end) => {
