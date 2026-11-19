@@ -45,6 +45,40 @@ pub fn displays() -> Result<Vec<Display>> {
         .collect()
 }
 
+#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+fn validate_x11_source(width: u32, height: u32) -> Result<()> {
+    ensure!(
+        width > 0 && height > 0 && u64::from(width) * u64::from(height) <= MAX_FRAME_PIXELS,
+        "The selected display exceeds the 16-megapixel native X11 capture limit"
+    );
+    Ok(())
+}
+
+/// Request a fixed X11 region so a concurrent mode change cannot enlarge the
+/// pixel allocation between checking the dimensions and asking the X server.
+#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+pub fn capture_x11_monitor(monitor: &Monitor) -> Result<image::RgbaImage> {
+    // Mirrors XCap's backend selection. Its Wayland portal may capture all
+    // monitors even for a region request, which has no enforceable byte bound.
+    let wayland = std::env::var_os("XDG_SESSION_TYPE").is_some_and(|v| v == "wayland")
+        || std::env::var_os("WAYLAND_DISPLAY")
+            .is_some_and(|v| v.to_string_lossy().to_lowercase().contains("wayland"));
+    ensure!(
+        !wayland,
+        "Bounded screen capture requires an X11 display session"
+    );
+    let (width, height) = (monitor.width()?, monitor.height()?);
+    validate_x11_source(width, height)?;
+    let image = monitor
+        .capture_region(0, 0, width, height)
+        .context("X11 display capture failed")?;
+    ensure!(
+        image.dimensions() == (width, height),
+        "Display dimensions changed during capture"
+    );
+    Ok(image)
+}
+
 pub struct Capturer {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     monitor: Monitor,
@@ -119,7 +153,7 @@ impl Capturer {
             };
             #[cfg(not(target_os = "macos"))]
             let image = {
-                let rgba = self.monitor.capture_image().context("Screen capture failed. Check Screen Recording permission on macOS, or the display session on Linux")?;
+                let rgba = capture_x11_monitor(&self.monitor)?;
                 let (width, height) =
                     crate::video::scaled_dimensions(rgba.width(), rgba.height(), self.max_edge)?;
                 let image = DynamicImage::ImageRgba8(rgba);
@@ -158,6 +192,7 @@ pub fn decode_frame(width: u32, height: u32, jpeg: Vec<u8>) -> Result<RemoteFram
         (1..=jpeg::BYTE_LIMIT).contains(&bytes),
         "Invalid frame size"
     );
+    jpeg::validate_baseline(&jpeg)?;
     let mut decoder = JpegDecoder::new(Cursor::new(jpeg)).context("Invalid screen frame")?;
     ensure!(
         decoder.dimensions() == (width, height),
@@ -167,6 +202,13 @@ pub fn decode_frame(width: u32, height: u32, jpeg: Vec<u8>) -> Result<RemoteFram
     limits.max_image_width = Some(MAX_FRAME_EDGE);
     limits.max_image_height = Some(MAX_FRAME_EDGE);
     limits.max_alloc = Some(128 * 1024 * 1024);
+    // A baseline scan with up to three components and 2x2 sampling uses
+    // row-sized scratch. Allow 32 MiB for tables, metadata and MCU rows,
+    // plus both compressed input buffers and any grayscale-to-RGB conversion.
+    limits.reserve(32 * 1024 * 1024 + 2 * bytes as u64)?;
+    if decoder.color_type() == image::ColorType::L8 {
+        limits.reserve(3 * u64::from(width) * u64::from(height))?;
+    }
     limits.reserve(decoder.total_bytes())?;
     decoder.set_limits(limits)?;
     let image = DynamicImage::from_decoder(decoder)
@@ -784,6 +826,16 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "full-size synthetic decoder memory test"]
+    fn maximum_baseline_frame_decodes_at_original_size() {
+        let mut jpeg = Vec::new();
+        JpegEncoder::new(&mut jpeg)
+            .encode_image(&image::RgbImage::new(MAX_FRAME_EDGE, MAX_FRAME_EDGE))
+            .unwrap();
+        let decoded = decode_frame(MAX_FRAME_EDGE, MAX_FRAME_EDGE, jpeg).unwrap();
+        assert_eq!(decoded.rgb.len() as u64, MAX_FRAME_PIXELS * 3);
+    }
+    #[test]
     #[ignore = "full-size synthetic entropy stress test"]
     fn maximum_original_noise_frame_fits_wire_budget_and_round_trips() {
         use rand::{RngCore, SeedableRng};
@@ -815,6 +867,34 @@ mod tests {
         let frame = decode_frame(16, 10, jpeg).unwrap();
         assert_eq!(frame.rgb.len(), 16 * 10 * 3);
     }
+    #[test]
+    fn screen_decoder_requires_single_scan_baseline_before_pixel_decode() {
+        let mut jpeg = Vec::new();
+        JpegEncoder::new(&mut jpeg)
+            .encode_image(&image::RgbImage::new(8, 8))
+            .unwrap();
+        let frame_header = jpeg.windows(2).position(|s| s == [0xff, 0xc0]).unwrap();
+        let scan = jpeg.windows(2).position(|s| s == [0xff, 0xda]).unwrap();
+        for (index, val) in [(frame_header + 1, 0xc2), (scan + 4, 1)] {
+            let mut variant = jpeg.clone();
+            variant[index] = val;
+            let error = decode_frame(8, 8, variant)
+                .err()
+                .expect("unsupported encoding");
+            assert!(error.to_string().contains("baseline"), "{error}");
+        }
+        decode_frame(8, 8, jpeg).unwrap();
+    }
+
+    #[test]
+    fn linux_native_source_limit_permits_5k_and_bounds_full_regions() {
+        assert!(validate_x11_source(5120, 2880).is_ok());
+        assert!(validate_x11_source(4096, 4096).is_ok());
+        assert!(validate_x11_source(8192, 4320).is_err());
+        assert!(validate_x11_source(u32::MAX, u32::MAX).is_err());
+        assert!(validate_x11_source(0, 1024).is_err());
+    }
+
     #[test]
     fn rejects_invalid_images_and_large_dimensions() {
         assert!(decode_frame(4097, 1, vec![1]).is_err());
