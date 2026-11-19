@@ -2,7 +2,8 @@
 
 ## Current status
 
-DeskLink is preparing an application to SignPath Foundation for Windows signing.
+DeskLink has submitted an application to SignPath Foundation for Windows signing.
+Submission was confirmed on 19 November 2026; admission remains pending.
 The Foundation has not accepted the project and has not signed its releases.
 Existing public Windows preview downloads remain unsigned. No endorsement or
 active signing relationship is implied by this application.
