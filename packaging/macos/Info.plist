@@ -5,8 +5,8 @@
   <key>CFBundleDisplayName</key><string>DeskLink</string>
   <key>CFBundleExecutable</key><string>DeskLink</string>
   <key>CFBundleIdentifier</key><string>dev.desklink.desktop</string>
-  <key>CFBundleVersion</key><string>8</string>
-  <key>CFBundleShortVersionString</key><string>0.3.2</string>
+  <key>CFBundleVersion</key><string>9</string>
+  <key>CFBundleShortVersionString</key><string>0.3.3</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>DeskLink connects to a computer you choose on your local network for approved screen sharing and remote control.</string>

@@ -27,6 +27,16 @@ permission-onboarding checks on this signed build remain pending. These checks d
 not establish physical Windows x64, production-scale capacity or every network/
 DPI configuration. Linux targets ARM64/X11; Wayland control is unsupported.
 
+## Stream quality (source version 0.3.3)
+
+Updated pairs start with Sharp, up to 2560 pixels on the longest edge. The viewer
+can switch to Balanced (1600) or Original / Retina (up to 4096), and choose Fit
+or 100% zoom with scroll bars. 100% maps transmitted pixels to physical display
+pixels. Larger streams use more bandwidth and may lower frame rate; Original
+is bounded and does not upscale the host display. Actual received dimensions
+appear in the session status. Both apps must support these profiles; older peers
+keep legacy quality. Input and per-session host approval are unchanged.
+
 ## Connection troubleshooting
 
 Run one DeskLink copy per computer identity. If the app says the computer ID is
