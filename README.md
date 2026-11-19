@@ -27,6 +27,13 @@ permission-onboarding checks on this signed build remain pending. These checks d
 not establish physical Windows x64, production-scale capacity or every network/
 DPI configuration. Linux targets ARM64/X11; Wayland control is unsupported.
 
+## Connection troubleshooting
+
+Run one DeskLink copy per computer identity. If the app says the computer ID is
+already connected, close other DeskLink copies, including older downloads or test
+builds. Keep the intended copy open; it will reconnect automatically with the same
+ID. A new launch does not need a new identity or weaker network/TLS settings.
+
 ## Build and run
 
 A Rust toolchain with the checked-in Cargo.lock is required. Recent local builds
