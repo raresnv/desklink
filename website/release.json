@@ -5,7 +5,7 @@
   "production_ready": false,
   "signing": {
     "macos": "Developer ID signed by Overtex Core Solutions SRL; Apple notarized with a stapled ticket.",
-    "windows": "Unsigned; publisher signing pending."
+    "windows": "Unsigned preview; publisher signing is not configured. The SignPath Foundation application was not approved."
   },
   "packages": [
     {
@@ -26,13 +26,14 @@
     {
       "id": "windows",
       "platform": "windows",
-      "version": "0.3.1",
+      "version": "0.3.3",
       "architecture": "x64",
       "format": "ZIP",
-      "bytes": 7183989,
-      "sha256": "3982086052913a9cb9b1630a3f75c495c5fcb33d172e03909abf6bc170336799",
-      "executable_sha256": "e2a1950c7806106d03cfa434a7496241d379360135a306927d201436c789feee",
-      "url": "/downloads/0.3.1/DeskLink-0.3.1-windows-x64.zip"
+      "bytes": 7103514,
+      "sha256": "43789092ab43082127a3303669b10d3acc371017f06ec215bf15c8cc5949292a",
+      "executable_sha256": "a51d09f71a2fcbf7ca6928a391747d80f7dcd62d2af80958e2877d0dc1846e76",
+      "url": "/downloads/0.3.3/DeskLink-0.3.3-windows-x64.zip",
+      "publisher_signed": false
     },
     {
       "id": "linux",
@@ -50,20 +51,21 @@
     {
       "id": "windows-arm64",
       "platform": "windows",
-      "version": "0.3.1",
+      "version": "0.3.3",
       "architecture": "ARM64",
       "format": "ZIP",
-      "bytes": 6518274,
-      "sha256": "1ab29a6036a91cf6c92ed8f5939239fe88576519b30ce5fa6aaab39db632bbf4",
-      "executable_sha256": "cf09bf7e44e5dffbe3b56226866a34da2728790064d92606eb6030a31e661949",
-      "url": "/downloads/0.3.1/DeskLink-0.3.1-windows-arm64.zip",
-      "experimental": true
+      "bytes": 6490586,
+      "sha256": "b1b4e3d0318f96c2ef436858fbd501211fd66c8685e2f6ef1eb440b32927c541",
+      "executable_sha256": "e2457e271ec67cb1a4be3776c818dcb1d55457d545245bdc3fac0519bf3999e0",
+      "url": "/downloads/0.3.3/DeskLink-0.3.3-windows-arm64.zip",
+      "experimental": true,
+      "publisher_signed": false
     }
   ],
-  "version_note": "Mac 0.3.3 sharper signed preview; Windows and Linux remain 0.3.1 previews.",
+  "version_note": "Mac and Windows 0.3.3 quality previews; Linux remains 0.3.1. Windows previews are unsigned.",
   "checksums_url": "/SHA256SUMS.txt",
   "verification": {
     "macos": "Exact public archive and executable, launch permission, Developer ID/Apple ticket/Gatekeeper, protected launch and same-ID public presence verified. Downloaded viewer profile/zoom/panning passed with generated public-relay frames. Downloaded host real-screen view-only test through the public relay to a local client: Balanced 1600x1039 46.80 fps, Sharp 2560x1663 34.19 fps, Original 3600x2338 18.60 fps in five-second measurement windows. Full two-way input, fresh permission onboarding and second physical Mac checks remain pending.",
-    "windows": "Existing 0.3.1 preview and verification scope retained; unsigned."
+    "windows": "Windows x64 GitHub Actions build and native ARM64 build verified. All 44 native Windows unit tests passed (3 ignored), including WIC JPEG decoding. Native ARM64 DXGI capture/encode/decode passed at Balanced 1600x919, Sharp 2560x1471 and Original 3600x2068 in a Windows 11 ARM VM; this is a static-desktop diagnostic, not an end-to-end frame-rate benchmark. Exact public archives, executables and version metadata verified in Windows. Full two-way input on 0.3.3 remains pending. Both builds are unsigned; ARM64 is experimental."
   }
 }

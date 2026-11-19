@@ -69,8 +69,9 @@ The installed exact public copy opened normally under AppTranslocation, showed
 version 0.3.3, retained the existing computer ID and became Online. Only one
 production app instance remains running. The prior working app is saved for rollback.
 
-The website now links the corrected 0.3.3 package; its live HTML, script, manifest and checksums were byte-verified. Rollback: `/opt/desklink/site-before-sharp-mac-20261119T100601Z`. Windows/Linux downloads
-remain 0.3.1 previews; Windows signing is still pending Foundation admission.
+The website now links the corrected 0.3.3 package; its live HTML, script, manifest and checksums were byte-verified. Rollback: `/opt/desklink/site-before-sharp-mac-20261119T100601Z`. At that Mac publication, Windows/Linux remained 0.3.1 previews. Windows was
+subsequently updated to an unsigned 0.3.3 preview; the Foundation application was
+not approved. See [the Windows release record](WINDOWS-RELEASE-0.3.3.md).
 All releases remain previews, without a general-availability or audit claim.
 
 Private evidence: `.tools/sharp-video/` reports and logs;

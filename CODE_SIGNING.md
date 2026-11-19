@@ -2,23 +2,15 @@
 
 ## Current status
 
-DeskLink has submitted an application to SignPath Foundation for Windows signing.
-Submission was confirmed on 19 November 2026; admission remains pending.
-The Foundation has not accepted the project and has not signed its releases.
-Existing public Windows preview downloads remain unsigned. No endorsement or
-active signing relationship is implied by this application.
+The SignPath Foundation application was not approved on 19 November 2026.
+DeskLink has no Foundation certificate or active Foundation signing relationship.
+Windows previews remain unsigned. No endorsement or code-signing service is
+implied. No paid signing subscription has been selected as a replacement.
 
-If the project is accepted, the Windows signing attribution will be:
-
-> Free code signing provided by [SignPath.io](https://signpath.io/), certificate
-> by [SignPath Foundation](https://signpath.org/).
-
-A Foundation signature will identify SignPath Foundation as publisher rather
-than the maintainer's personal name. Mac signing uses a separate Developer ID
-Application identity, Overtex Core Solutions SRL. The public Mac 0.3.2 preview is
-Developer ID signed, Apple notarized and includes its stapled ticket. It replaces
-the download link to the older, non-notarized 0.3.1 Mac preview. Windows and Linux
-downloads remain version 0.3.1; Windows signing is pending.
+Mac signing is separate: the Mac 0.3.3 preview is Developer ID signed by
+Overtex Core Solutions SRL, Apple notarized and includes its stapled ticket.
+Windows publisher signing is not configured. See each public download's actual
+version and signing status.
 
 ## Project roles
 
@@ -30,18 +22,19 @@ Initial project roles:
 
 The same initial maintainer holds these roles. This does not claim independent
 review or a multi-person approval threshold. All maintainers must enable MFA on
-GitHub and SignPath. Additional authors/reviewers/approvers must be recorded here
+GitHub. Any future signing-service accounts must also use MFA. Additional
+authors/reviewers/approvers must be recorded here
 before being granted signing responsibilities.
 
 ## Release controls
 
-Windows signing will accept only project executables produced from this public
-source by GitHub-hosted Actions, uploaded as workflow artifacts and verified by
-SignPath's trusted build integration. Local test executables and files supplied
-from outside that build will not be substituted for signed artifacts.
+Any future Windows signing will accept only project executables produced from
+this public source by GitHub-hosted Actions, uploaded as workflow artifacts and verified by
+the configured provider's trusted build integration. Local test executables and
+files supplied from outside that build will not be substituted for signed artifacts.
 
-Every release needs manual approval in SignPath. Pull requests and forks must
-not receive signing credentials. Missing configuration, rejection or invalid
+Every signed release needs manual approval in the configured signing service.
+Pull requests and forks must not receive signing credentials. Missing configuration, rejection or invalid
 Authenticode trust/timestamp must stop signed packaging/publication. The signed
 artifact's expected publisher, product/version and archive/executable hashes
 must be verified before new immutable download links are published.

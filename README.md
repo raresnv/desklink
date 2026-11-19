@@ -13,9 +13,10 @@ approves viewing or keyboard/mouse control for every session.
 ## Release status
 
 Public Mac downloads are now version 0.3.3 preview, Developer ID signed by Overtex
-Core Solutions SRL and notarized by Apple with a stapled ticket. Windows and Linux
-remain 0.3.1 previews. The SignPath Foundation application is submitted and its
-admission decision is pending. Existing Windows downloads are unsigned; do not
+Core Solutions SRL and notarized by Apple with a stapled ticket. Windows x64 and
+experimental ARM64 downloads are also 0.3.3 previews; Linux remains 0.3.1. The
+SignPath Foundation application was not approved; Windows publisher signing
+is not configured. Existing Windows downloads are unsigned; do not
 assume a local build or CI artifact is publisher signed.
 
 The 0.3.1 Mac and Windows previews were exercised for screen sharing and input in
@@ -26,6 +27,11 @@ file protection and connects to the public relay. Full two-way input and fresh
 permission-onboarding checks on this signed build remain pending. Its downloaded viewer passed live quality switching, Fit, 100% zoom and panning through the public relay with generated images. A short real-screen, view-only test of the downloaded Mac host through the public relay to a local client measured about 34 fps in Sharp (2560 × 1663) and 19 fps in Original (3600 × 2338). An updated second physical Mac remains unchecked. These checks do
 not establish physical Windows x64, production-scale capacity or every network/
 DPI configuration. Linux targets ARM64/X11; Wayland control is unsupported.
+
+Windows 0.3.3 passed 44 native unit tests, ARM64 capture/decoding at all three
+quality modes, exact public-download hash/version checks and process launch with
+a public-relay TCP connection. These do not establish a full GUI or two-way input
+retest. See the [Windows release record](docs/WINDOWS-RELEASE-0.3.3.md).
 
 ## Stream quality (source version 0.3.3)
 
