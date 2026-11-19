@@ -1,23 +1,27 @@
 {
-  "version": "0.3.1",
+  "version": "0.3.2",
   "channel": "public preview",
-  "date": "2026-11-18",
+  "date": "2026-11-19",
   "production_ready": false,
   "signing": {
-    "macos": "Development signed; distribution signing and Apple notarization pending.",
+    "macos": "Developer ID signed by Overtex Core Solutions SRL; Apple notarized with a stapled ticket.",
     "windows": "Unsigned; publisher signing pending."
   },
   "packages": [
     {
       "id": "macos",
       "platform": "macos",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "architecture": "Apple Silicon / ARM64",
       "format": "ZIP",
-      "bytes": 6628567,
-      "sha256": "00ecc2859000c98ab98243c230d068933a31861a296defd0f8205b18729cfa2a",
-      "executable_sha256": "6972e4c4006f4b024b65e5d4fd06740ea13cc62664c0d3ebe86d7bb6c8cc0095",
-      "url": "/downloads/0.3.1/DeskLink-0.3.1-macos-arm64.zip"
+      "bytes": 6629935,
+      "sha256": "6ba937f698963f33fe3779c746057834322b2f07bc71c758af26e88002d4c233",
+      "executable_sha256": "0ae7a2d2a687d1e7497875d7f1c288c3c100092788522bd4cde327fa9c1676b3",
+      "url": "/downloads/0.3.2/DeskLink-0.3.2-macos-arm64.zip",
+      "publisher": "Overtex Core Solutions SRL",
+      "developer_id_signed": true,
+      "notarized": true,
+      "ticket_stapled": true
     },
     {
       "id": "windows",
@@ -55,5 +59,11 @@
       "url": "/downloads/0.3.1/DeskLink-0.3.1-windows-arm64.zip",
       "experimental": true
     }
-  ]
+  ],
+  "version_note": "Mac 0.3.2 signed preview; Windows and Linux remain 0.3.1 previews.",
+  "checksums_url": "/SHA256SUMS.txt",
+  "verification": {
+    "macos": "Exact HTTPS archive verified, Gatekeeper accepted, normal launch and public-relay presence checked. Signed-build two-way input and fresh permission onboarding pending.",
+    "windows": "Existing 0.3.1 preview and verification scope retained; unsigned."
+  }
 }

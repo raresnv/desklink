@@ -15,9 +15,10 @@ If the project is accepted, the Windows signing attribution will be:
 
 A Foundation signature will identify SignPath Foundation as publisher rather
 than the maintainer's personal name. Mac signing uses a separate Developer ID
-Application identity, Overtex Core Solutions SRL. The local 0.3.2 Mac package has
-completed Apple notarization; it is not yet published. The existing public 0.3.1
-Mac preview has a development signature and is not notarized.
+Application identity, Overtex Core Solutions SRL. The public Mac 0.3.2 preview is
+Developer ID signed, Apple notarized and includes its stapled ticket. It replaces
+the download link to the older, non-notarized 0.3.1 Mac preview. Windows and Linux
+downloads remain version 0.3.1; Windows signing is pending.
 
 ## Project roles
 

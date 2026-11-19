@@ -49,6 +49,6 @@ fetch('/release.json').then(response => {
     const button = document.querySelector('.platform-download');
     button.href = item.url; button.setAttribute('download', '');
     button.querySelector('.download-label').textContent = platform === 'macos' ? 'Download for Mac' : 'Download for Windows';
-    document.querySelector('#platform-note').textContent = `${release.version} preview · ${platform === 'macos' ? 'Apple Silicon · macOS 12.3+' : 'Windows x64'}`;
+    document.querySelector('#platform-note').textContent = `${item.version} preview · ${platform === 'macos' ? 'Apple Silicon · macOS 12.3+' : 'Windows x64'}`;
   }
 }).catch(() => { /* Static, versioned download links remain fully usable. */ });

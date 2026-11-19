@@ -12,17 +12,20 @@ approves viewing or keyboard/mouse control for every session.
 
 ## Release status
 
-Public downloads currently remain version 0.3.1 preview. The 0.3.2 source prepares
-signed distribution: the Mac package is Developer ID signed/notarized locally,
-while Windows signing through SignPath Foundation is being prepared. The project
-has not yet been accepted by the Foundation. Existing Windows downloads are
-unsigned; do not assume a local build or CI artifact is publisher signed.
+Public Mac downloads are now version 0.3.2 preview, Developer ID signed by Overtex
+Core Solutions SRL and notarized by Apple with a stapled ticket. Windows and Linux
+remain 0.3.1 previews. The SignPath Foundation application is submitted and its
+admission decision is pending. Existing Windows downloads are unsigned; do not
+assume a local build or CI artifact is publisher signed.
 
-Mac and Windows screen sharing and input were exercised in both directions
-through the public relay using a Mac and Windows 11 ARM VM running Windows x64
-under emulation. This does not establish physical Windows x64, fresh-install
-permission onboarding, production-scale service capacity, or every network/DPI
-configuration. Linux currently targets ARM64/X11; Wayland control is unsupported.
+The 0.3.1 Mac and Windows previews were exercised for screen sharing and input in
+both directions through the public relay using a Mac and Windows 11 ARM VM running
+Windows x64 under emulation. The exact downloaded signed Mac 0.3.2 package passes
+signature, notarization-ticket and Gatekeeper checks; it opens under downloaded-
+file protection and connects to the public relay. Full two-way input and fresh
+permission-onboarding checks on this signed build remain pending. These checks do
+not establish physical Windows x64, production-scale capacity or every network/
+DPI configuration. Linux targets ARM64/X11; Wayland control is unsupported.
 
 ## Build and run
 
