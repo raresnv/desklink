@@ -19,6 +19,7 @@ pub struct Display {
 }
 
 impl Display {
+    #[cfg(not(target_os = "linux"))]
     fn from_monitor(monitor: &Monitor) -> Result<Self> {
         let info = DesktopInfo {
             name: monitor.name()?.chars().take(80).collect(),
@@ -56,10 +57,17 @@ mod jpeg;
 pub mod permissions;
 
 pub fn displays() -> Result<Vec<Display>> {
+    #[cfg(target_os = "linux")]
+    let x11 = x11_capture::X11::connect()?;
     Monitor::all()
         .context("Could not list displays")?
         .iter()
-        .map(Display::from_monitor)
+        .map(|monitor| {
+            #[cfg(target_os = "linux")]
+            return x11.display(monitor.id()?);
+            #[cfg(not(target_os = "linux"))]
+            Display::from_monitor(monitor)
+        })
         .collect()
 }
 
@@ -72,17 +80,11 @@ fn validate_x11_source(width: u32, height: u32) -> Result<()> {
     Ok(())
 }
 
-/// Request a fixed X11 region so a concurrent mode change cannot enlarge the
-/// pixel allocation between checking the dimensions and asking the X server.
-#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
-pub fn capture_x11_monitor(monitor: &Monitor) -> Result<image::RgbaImage> {
-    capture_x11_region(monitor, monitor.width()?, monitor.height()?)
-}
+#[cfg(target_os = "linux")]
+mod x11_capture;
 
-#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
-fn capture_x11_region(monitor: &Monitor, width: u32, height: u32) -> Result<image::RgbaImage> {
-    // Mirrors XCap's backend selection. Its Wayland portal may capture all
-    // monitors even for a region request, which has no enforceable byte bound.
+#[cfg(target_os = "linux")]
+fn require_x11_session() -> Result<()> {
     let wayland = std::env::var_os("XDG_SESSION_TYPE").is_some_and(|v| v == "wayland")
         || std::env::var_os("WAYLAND_DISPLAY")
             .is_some_and(|v| v.to_string_lossy().to_lowercase().contains("wayland"));
@@ -90,19 +92,21 @@ fn capture_x11_region(monitor: &Monitor, width: u32, height: u32) -> Result<imag
         !wayland,
         "Bounded screen capture requires an X11 display session"
     );
-    validate_x11_source(width, height)?;
-    let image = monitor
-        .capture_region(0, 0, width, height)
-        .context("X11 display capture failed")?;
-    ensure!(
-        image.dimensions() == (width, height),
-        "Display dimensions changed during capture"
-    );
-    Ok(image)
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn capture_x11_monitor(monitor: &Monitor) -> Result<image::RgbaImage> {
+    require_x11_session()?;
+    let x11 = x11_capture::X11::connect()?;
+    let display = x11.display(monitor.id()?)?;
+    x11.capture(&display)
 }
 
 pub struct Capturer {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    x11: x11_capture::X11,
+    #[cfg(target_os = "macos")]
     monitor: Monitor,
     #[cfg(not(target_os = "windows"))]
     approved: Display,
@@ -131,10 +135,19 @@ impl Capturer {
             "Invalid frame edge limit"
         );
         check_capture_permission()?;
+        #[cfg(target_os = "linux")]
+        let x11 = {
+            require_x11_session()?;
+            x11_capture::X11::connect()?
+        };
+        #[cfg(target_os = "linux")]
+        let current = x11.display(id)?;
+        #[cfg(not(target_os = "linux"))]
         let monitor = Monitor::all()?
             .into_iter()
             .find(|monitor| monitor.id().ok() == Some(id))
             .context("The selected display was disconnected")?;
+        #[cfg(not(target_os = "linux"))]
         let current = Display::from_monitor(&monitor)?;
         let approved = match approved {
             Some(approved) => {
@@ -148,8 +161,10 @@ impl Capturer {
             capture: macos_capture::ScreenCapture::open(&approved, max_edge)?,
             #[cfg(target_os = "windows")]
             capture: windows_capture::ScreenCapture::open(approved, max_edge)?,
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
             monitor,
+            #[cfg(target_os = "linux")]
+            x11,
             #[cfg(not(target_os = "windows"))]
             approved,
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -168,7 +183,7 @@ impl Capturer {
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
-            "XCap"
+            "X11 RandR"
         }
     }
     pub fn frame(&self) -> Result<Option<Message>> {
@@ -192,15 +207,7 @@ impl Capturer {
             };
             #[cfg(not(target_os = "macos"))]
             let image = {
-                self.approved
-                    .verify_source(&Display::from_monitor(&self.monitor)?)?;
-                let rgba = capture_x11_region(
-                    &self.monitor,
-                    self.approved.info.width,
-                    self.approved.info.height,
-                )?;
-                self.approved
-                    .verify_source(&Display::from_monitor(&self.monitor)?)?;
+                let rgba = self.x11.capture(&self.approved)?;
                 let (width, height) =
                     crate::video::scaled_dimensions(rgba.width(), rgba.height(), self.max_edge)?;
                 let image = DynamicImage::ImageRgba8(rgba);
@@ -310,6 +317,8 @@ pub fn resolve_character_keycode(character: char) -> Result<u16> {
 
 impl InputController {
     pub fn new(desktop: DesktopInfo) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        x11_capture::X11::connect()?.check_input_screen(&desktop)?;
         let settings = Settings {
             open_prompt_to_get_permissions: false,
             ..Settings::default()

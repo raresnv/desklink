@@ -9,7 +9,7 @@ license = "MIT"
 
 [features]
 default = ["desktop"]
-desktop = ["dep:eframe", "dep:enigo", "dep:xcap", "dep:image", "dep:local-ip-address", "dep:dispatch2", "dep:core-graphics", "dep:objc2", "dep:objc2-foundation", "dep:objc2-screen-capture-kit", "dep:objc2-core-media", "dep:objc2-core-video", "dep:block2", "dep:windows", "dep:core-foundation"]
+desktop = ["dep:eframe", "dep:enigo", "dep:xcap", "dep:x11rb", "dep:image", "dep:local-ip-address", "dep:dispatch2", "dep:core-graphics", "dep:objc2", "dep:objc2-foundation", "dep:objc2-screen-capture-kit", "dep:objc2-core-media", "dep:objc2-core-video", "dep:block2", "dep:windows", "dep:core-foundation"]
 
 [dependencies]
 anyhow = "1"
@@ -36,6 +36,9 @@ enigo = { version = "0.3", optional = true }
 xcap = { version = "0.9.10", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
 local-ip-address = { version = "0.6", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13.2", optional = true, features = ["randr", "image"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = { version = "0.10", optional = true }
