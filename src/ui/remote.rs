@@ -20,6 +20,7 @@ pub(super) struct RemoteInput {
     modifiers: HashSet<Key>,
     buttons: HashSet<MouseButton>,
     wheel: egui::Vec2,
+    remote_wheel_tail: bool,
     pointer: Option<egui::Pos2>,
 }
 
@@ -249,12 +250,10 @@ impl RemoteInput {
         if !enabled || outside || shortcut || !ctx.input(|i| i.focused) {
             response.surrender_focus();
         }
+        self.route_wheel(ctx, response.has_focus());
         if response.has_focus() {
             lock_remote_keyboard(ctx, response);
             self.active = true;
-            // egui 0.31 consumes the smoothed wheel delta when ScrollArea ends.
-            // Remote input uses the original wheel events; leave the scrollbars interactive.
-            ctx.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
             self.forward(ctx, response.rect, visible, emit);
             if !self.active {
                 response.surrender_focus();
@@ -262,6 +261,52 @@ impl RemoteInput {
         } else {
             self.release_to(emit);
         }
+    }
+
+    fn route_wheel(&mut self, ctx: &egui::Context, remote_focus: bool) {
+        // egui keeps part of each wheel notch for later frames, including frames
+        // after focus changes. Keep its normal smoothing once that gesture ends.
+        let line_speed = ctx.options(|options| options.line_scroll_speed);
+        ctx.input_mut(|i| {
+            let scrolling =
+                i.smooth_scroll_delta != egui::Vec2::ZERO || i.raw_scroll_delta != egui::Vec2::ZERO;
+            if scrolling && remote_focus {
+                self.remote_wheel_tail = true;
+            } else if !scrolling && i.stable_dt > 0.0 {
+                self.remote_wheel_tail = false;
+            }
+            if remote_focus {
+                i.smooth_scroll_delta = egui::Vec2::ZERO;
+            } else if self.remote_wheel_tail {
+                // The smoothed delta can mix an earlier remote notch with a new
+                // local gesture. Pan only by new local events during this interval.
+                let mut local = egui::Vec2::ZERO;
+                for event in &i.events {
+                    if let Event::MouseWheel {
+                        unit,
+                        delta,
+                        modifiers,
+                    } = event
+                    {
+                        if modifiers.ctrl || modifiers.command || modifiers.mac_cmd {
+                            continue;
+                        }
+                        let points = *delta
+                            * match unit {
+                                egui::MouseWheelUnit::Point => 1.0,
+                                egui::MouseWheelUnit::Line => line_speed,
+                                egui::MouseWheelUnit::Page => i.screen_rect.height(),
+                            };
+                        local += if modifiers.shift {
+                            egui::vec2(points.x + points.y, 0.0)
+                        } else {
+                            points
+                        };
+                    }
+                }
+                i.smooth_scroll_delta = local;
+            }
+        });
     }
 
     pub(super) fn release(&mut self, viewer: &Viewer) {
@@ -272,7 +317,10 @@ impl RemoteInput {
         if self.active {
             emit(InputEvent::ReleaseAll);
         }
-        *self = Self::default();
+        *self = Self {
+            remote_wheel_tail: self.remote_wheel_tail,
+            ..Self::default()
+        };
     }
 
     fn sync_modifiers(&mut self, emit: &mut impl FnMut(InputEvent), modifiers: Modifiers) {

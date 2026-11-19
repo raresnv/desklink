@@ -8,6 +8,7 @@ struct Canvas {
     visible: egui::Rect,
     sent: Vec<InputEvent>,
     time: f64,
+    frame_seconds: f64,
 }
 
 impl Canvas {
@@ -26,12 +27,13 @@ impl Canvas {
             visible: egui::Rect::NOTHING,
             sent: vec![],
             time: 0.0,
+            frame_seconds: 0.2,
         }
     }
 
     fn frame(&mut self, zoom: Zoom, events: Vec<Event>) {
         self.sent.clear();
-        self.time += 0.2;
+        self.time += self.frame_seconds;
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -214,4 +216,77 @@ fn wheel_targets_the_pointer_location_at_the_time_of_each_event() {
         .sent
         .iter()
         .any(|e| matches!(e, InputEvent::Scroll { vertical: 2, .. })));
+}
+
+#[test]
+fn remote_wheel_followed_by_focus_release_never_pans_locally() {
+    // Check both an immediate new local wheel and one after egui's smoothing tail.
+    for idle_frames in [0, 45] {
+        let mut canvas = Canvas::new();
+        canvas.frame_seconds = 1.0 / 60.0;
+        for _ in 0..12 {
+            canvas.frame(Zoom::Native, vec![]);
+        }
+        let origin = canvas.full.min;
+        let center = canvas.visible.center();
+        canvas.frame(
+            Zoom::Native,
+            vec![
+                Event::PointerMoved(center),
+                button(center, true),
+                button(center, false),
+            ],
+        );
+        canvas.frame(
+            Zoom::Native,
+            vec![Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -3.0),
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        assert!(matches!(
+            canvas.sent.as_slice(),
+            [InputEvent::Scroll {
+                horizontal: 0,
+                vertical: 3
+            }]
+        ));
+        canvas.frame(
+            Zoom::Native,
+            vec![Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::CTRL | Modifiers::ALT,
+            }],
+        );
+        assert!(matches!(canvas.sent.as_slice(), [InputEvent::ReleaseAll]));
+        for _ in 0..idle_frames {
+            canvas.frame(Zoom::Native, vec![]);
+            assert_eq!(
+                canvas.full.min, origin,
+                "released remote wheel panned locally"
+            );
+            assert!(canvas.sent.is_empty());
+        }
+        canvas.frame(
+            Zoom::Native,
+            vec![Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -5.0),
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        for _ in 0..45 {
+            canvas.frame(Zoom::Native, vec![]);
+            assert!(canvas.sent.is_empty());
+        }
+        assert_eq!(
+            canvas.full.min,
+            origin - egui::vec2(0.0, 5.0),
+            "only the new local wheel should pan"
+        );
+    }
 }
