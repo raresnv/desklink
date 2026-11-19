@@ -12,7 +12,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use futures_util::{SinkExt, StreamExt};
 use rand::{rngs::OsRng, RngCore};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, VecDeque},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -407,18 +407,13 @@ pub(super) async fn handle(
             };
             let (events, mut replies) = mpsc::channel(16);
             let generation = random();
-            {
+            let inserted = {
                 let mut state = service
                     .state
                     .lock()
                     .map_err(|_| anyhow::anyhow!("Device service unavailable"))?;
-                ensure!(
-                    !state.peers.contains_key(&id),
-                    "This computer ID is already connected"
-                );
-                state.peers.insert(
-                    id.clone(),
-                    Online {
+                if let Entry::Vacant(slot) = state.peers.entry(id.clone()) {
+                    slot.insert(Online {
                         key: public_key,
                         name,
                         events,
@@ -426,8 +421,22 @@ pub(super) async fn handle(
                         available: true,
                         busy: false,
                         ip: source_ip,
+                    });
+                    true
+                } else {
+                    false
+                }
+            };
+            if !inserted {
+                send(
+                    &mut socket,
+                    &Event::Error {
+                        reason: "This computer ID is already connected. Close the other DeskLink copy on this computer; this copy will reconnect automatically.".into(),
                     },
-                );
+                )
+                .await?;
+                timeout(Duration::from_secs(5), socket.close(None)).await??;
+                return Ok(());
             }
             let run=async {
                 send(&mut socket,&Event::Registered{id:id.clone()}).await?;

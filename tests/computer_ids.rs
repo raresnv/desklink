@@ -96,6 +96,49 @@ fn offer(presence: &DevicePresence) -> desklink::relay::addressed::ConnectionOff
     }
 }
 #[test]
+fn duplicate_registration_reports_conflict_without_interrupting_online_copy() {
+    let relay = TestRelay::start();
+    let (identity, first, id) = relay.device("SameComputer");
+    let second = DevicePresence::connect(
+        relay.endpoint.clone(),
+        identity,
+        "private-computer-id-test-access-code".into(),
+        "SecondCopy".into(),
+    )
+    .unwrap();
+    let event = second.events.recv_timeout(Duration::from_secs(4)).unwrap();
+    let DeviceEvent::Offline(reason) = event else {
+        panic!("duplicate must be rejected, got {event:?}");
+    };
+    assert!(
+        reason.contains("already connected") && reason.contains("Close"),
+        "duplicate needs an actionable error instead of a socket reset: {reason}"
+    );
+    let (_, viewer, _) = relay.device("OtherComputer");
+    viewer.request(id.clone(), false).unwrap();
+    assert_eq!(offer(&first).context().host, id);
+    let _ = offer(&viewer);
+    drop(first);
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let event = second
+            .events
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .unwrap();
+        match event {
+            DeviceEvent::Ready(again) => {
+                assert_eq!(again, id, "reconnect must retain the computer ID");
+                break;
+            }
+            DeviceEvent::Offline(reason) => {
+                assert!(reason.contains("already connected"), "{reason}")
+            }
+            event => panic!("unexpected reconnect event: {event:?}"),
+        }
+    }
+}
+
+#[test]
 fn numeric_address_connects_authenticated_devices_repeatedly_without_invitations() {
     let relay = TestRelay::start();
     let (host, host_presence, host_id) = relay.device("Host");
@@ -484,4 +527,63 @@ fn public_registration_is_explicit_and_preserves_owned_ids_across_reconnects() {
         panic!("known identity was throttled")
     };
     assert_eq!(id, again);
+}
+
+#[test]
+#[ignore = "requires an explicitly configured deployed relay and isolated probe identity"]
+fn deployed_relay_duplicate_registration_is_actionable_and_recovers() {
+    let endpoint = RelayEndpoint::parse(
+        &std::env::var("DESKLINK_RELAY_DUPLICATE_PROBE_ENDPOINT")
+            .expect("configure the deployed relay endpoint"),
+    )
+    .unwrap();
+    let root = PathBuf::from(
+        std::env::var("DESKLINK_RELAY_DUPLICATE_PROBE_STATE")
+            .expect("configure a separate probe identity directory"),
+    );
+    let identity = Arc::new(Identity::load_or_create(&root).unwrap());
+    let connect = || {
+        DevicePresence::connect(
+            endpoint.clone(),
+            identity.clone(),
+            String::new(),
+            "Duplicate-connection regression probe".into(),
+        )
+        .unwrap()
+    };
+    let first = connect();
+    let DeviceEvent::Ready(id) = first.events.recv_timeout(Duration::from_secs(15)).unwrap() else {
+        panic!("first probe did not register");
+    };
+    let second = connect();
+    let DeviceEvent::Offline(reason) = second.events.recv_timeout(Duration::from_secs(15)).unwrap()
+    else {
+        panic!("duplicate probe was not rejected");
+    };
+    assert!(
+        reason.contains("already connected") && reason.contains("Close"),
+        "deployed duplicate error is not actionable: {reason}"
+    );
+    assert!(matches!(
+        first.events.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    drop(first);
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        match second
+            .events
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .unwrap()
+        {
+            DeviceEvent::Ready(again) => {
+                assert_eq!(again, id);
+                break;
+            }
+            DeviceEvent::Offline(reason) => {
+                assert!(reason.contains("already connected"), "{reason}")
+            }
+            event => panic!("unexpected deployed reconnect event: {event:?}"),
+        }
+    }
 }
