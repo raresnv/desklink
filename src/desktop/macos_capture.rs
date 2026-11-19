@@ -2,6 +2,7 @@
 //! only the latest bounded RGB frame; compression stays on the session worker.
 use anyhow::{anyhow, ensure, Context, Result};
 use block2::RcBlock;
+use core_graphics::display::CGDisplay;
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
 use image::RgbImage;
 use objc2::{
@@ -19,26 +20,39 @@ use std::{
     time::Duration,
 };
 
-pub(super) fn stream_dimensions(width: usize, height: usize) -> Result<(usize, usize)> {
-    ensure!(
-        width > 0 && height > 0,
-        "The selected display has empty bounds"
-    );
-    let scale = 1600.0 / width.max(height) as f64;
-    let scale = scale.min(1.0);
-    Ok((
-        ((width as f64 * scale).round() as usize).max(1),
-        ((height as f64 * scale).round() as usize).max(1),
-    ))
+fn stream_dimensions(
+    mode_pixels: Option<(u64, u64)>,
+    display_points: (isize, isize),
+    max_edge: u32,
+) -> Result<(u32, u32)> {
+    let (points_w, points_h) = display_points;
+    let pixels = mode_pixels.and_then(|(w, h)| {
+        let (w, h) = (u32::try_from(w).ok()?, u32::try_from(h).ok()?);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        // Display modes can report the panel's unrotated pixel dimensions.
+        if points_w > 0 && points_h > 0 && points_w != points_h && (points_w > points_h) != (w > h)
+        {
+            Some((h, w))
+        } else {
+            Some((w, h))
+        }
+    });
+    let (w, h) = match pixels {
+        Some(size) => size,
+        None => (u32::try_from(points_w)?, u32::try_from(points_h)?),
+    };
+    crate::video::scaled_dimensions(w, h, max_edge)
 }
 
 fn copy_bgra(width: usize, height: usize, stride: usize, data: &[u8]) -> Result<RgbImage> {
     ensure!(
-        width > 0 && height > 0 && width <= 1600 && height <= 1600,
+        width > 0 && height > 0 && width.max(height) <= crate::video::MAX_FRAME_EDGE as usize,
         "Invalid stream dimensions"
     );
     ensure!(
-        stride >= width * 4
+        (width * 4..=width * 4 + 4096).contains(&stride)
             && stride
                 .checked_mul(height)
                 .is_some_and(|len| len <= data.len()),
@@ -58,12 +72,19 @@ struct State {
     frame: Option<RgbImage>,
     error: Option<String>,
 }
-#[derive(Default)]
 struct Mailbox {
     state: Mutex<State>,
     ready: Condvar,
+    max_edge: usize,
 }
 impl Mailbox {
+    fn new(max_edge: u32) -> Self {
+        Self {
+            state: Mutex::default(),
+            ready: Condvar::new(),
+            max_edge: max_edge as usize,
+        }
+    }
     fn publish(&self, frame: RgbImage) {
         if let Ok(mut state) = self.state.lock() {
             if state.error.is_none() {
@@ -113,9 +134,12 @@ define_class!(
                 let height = CVPixelBufferGetHeight(&buffer);
                 let stride = CVPixelBufferGetBytesPerRow(&buffer);
                 ensure!(CVPixelBufferGetPixelFormatType(&buffer) == kCVPixelFormatType_32BGRA, "Unsupported capture pixel format");
-                let len = stride.checked_mul(height).context("Stream pixel size overflow")?;
+                ensure!(width > 0 && height > 0 && width.max(height) <= self.ivars().max_edge, "Unexpected stream dimensions");
+                ensure!((width * 4..=width * 4 + 4096).contains(&stride), "Invalid stream row stride");
+                // Up to 4096 rows of 4096 BGRA pixels plus one page of row padding.
+                let len = stride * height;
                 let base = CVPixelBufferGetBaseAddress(&buffer);
-                ensure!(!base.is_null() && len <= 32 * 1024 * 1024, "Invalid stream pixel storage");
+                ensure!(!base.is_null() && len <= CVPixelBufferGetDataSize(&buffer), "Invalid stream pixel storage");
                 let data = std::slice::from_raw_parts(base.cast::<u8>(), len);
                 copy_bgra(width, height, stride, data)
             })();
@@ -140,7 +164,7 @@ pub(super) struct ScreenCapture {
     mailbox: Arc<Mailbox>,
 }
 impl ScreenCapture {
-    pub fn open(id: u32) -> Result<Self> {
+    pub fn open(id: u32, max_edge: u32) -> Result<Self> {
         let (tx, rx) = mpsc::sync_channel(1);
         let completion = RcBlock::new(
             move |content: *mut SCShareableContent, error: *mut NSError| {
@@ -169,21 +193,24 @@ impl ScreenCapture {
             .context("Display enumeration timed out")?
             .map_err(|error| anyhow!(error))?
             .0;
-        let mailbox = Arc::new(Mailbox::default());
+        let mailbox = Arc::new(Mailbox::new(max_edge));
         let output: Retained<Output> =
             unsafe { msg_send![super(Output::alloc().set_ivars(mailbox.clone())), init] };
         let queue = DispatchQueue::new("dev.desklink.screen-output", DispatchQueueAttr::SERIAL);
         let stream = unsafe {
+            let mode_pixels = CGDisplay::new(id)
+                .display_mode()
+                .map(|mode| (mode.pixel_width(), mode.pixel_height()));
             let (width, height) =
-                stream_dimensions(display.width() as usize, display.height() as usize)?;
+                stream_dimensions(mode_pixels, (display.width(), display.height()), max_edge)?;
             let filter = SCContentFilter::initWithDisplay_excludingWindows(
                 SCContentFilter::alloc(),
                 &display,
                 &NSArray::new(),
             );
             let config = SCStreamConfiguration::new();
-            config.setWidth(width);
-            config.setHeight(height);
+            config.setWidth(width as usize);
+            config.setHeight(height as usize);
             config.setMinimumFrameInterval(CMTime::new(1, 60));
             config.setQueueDepth(3);
             config.setPixelFormat(kCVPixelFormatType_32BGRA);
@@ -250,10 +277,47 @@ mod tests {
 
     #[test]
     fn stream_dimensions_preserve_aspect_without_upscaling() {
-        assert_eq!(stream_dimensions(1800, 1169).unwrap(), (1600, 1039));
-        assert_eq!(stream_dimensions(1440, 900).unwrap(), (1440, 900));
-        assert_eq!(stream_dimensions(900, 1800).unwrap(), (800, 1600));
-        assert!(stream_dimensions(0, 100).is_err());
+        let retina = Some((3600, 2338));
+        assert_eq!(
+            stream_dimensions(retina, (1800, 1169), 1600).unwrap(),
+            (1600, 1039)
+        );
+        assert_eq!(
+            stream_dimensions(retina, (1800, 1169), 2560).unwrap(),
+            (2560, 1663)
+        );
+        assert_eq!(
+            stream_dimensions(retina, (1800, 1169), 4096).unwrap(),
+            (3600, 2338)
+        );
+        assert_eq!(
+            stream_dimensions(retina, (1169, 1800), 4096).unwrap(),
+            (2338, 3600)
+        );
+        assert_eq!(
+            stream_dimensions(None, (1440, 900), 4096).unwrap(),
+            (1440, 900)
+        );
+        assert_eq!(
+            stream_dimensions(Some((0, 100)), (900, 1800), 1600).unwrap(),
+            (800, 1600)
+        );
+        assert!(stream_dimensions(None, (-1, 100), 1600).is_err());
+    }
+
+    #[test]
+    fn retina_bgra_storage_allows_padded_rows_and_rejects_invalid_sizes() {
+        let width = 3600;
+        let stride = width * 4 + 64;
+        assert_eq!(
+            copy_bgra(width, 2, stride, &vec![0; stride * 2])
+                .unwrap()
+                .width(),
+            3600
+        );
+        assert!(copy_bgra(4097, 1, 4097 * 4, &vec![0; 4097 * 4]).is_err());
+        assert!(copy_bgra(1, 1, 65536, &vec![0; 65536]).is_err());
+        assert!(copy_bgra(2, 2, usize::MAX, &[]).is_err());
     }
 
     #[test]
@@ -273,7 +337,7 @@ mod tests {
 
     #[test]
     fn newest_frame_replaces_old_frame_and_errors_take_priority() {
-        let mailbox = Mailbox::default();
+        let mailbox = Mailbox::new(1600);
         mailbox.publish(image::RgbImage::new(2, 1));
         mailbox.publish(image::RgbImage::new(3, 1));
         assert_eq!(

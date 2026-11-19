@@ -1,13 +1,12 @@
-use crate::protocol::{DesktopInfo, InputEvent, Key, Message, MouseButton, MAX_FRAME_PIXELS};
+use crate::protocol::{DesktopInfo, InputEvent, Key, Message, MouseButton};
+use crate::video::{VideoProfile, MAX_FRAME_EDGE, MAX_FRAME_PIXELS};
 use anyhow::{bail, ensure, Context, Result};
 use enigo::{Axis, Direction, Enigo, Keyboard, Mouse, Settings};
 #[cfg(not(target_os = "macos"))]
 use enigo::{Button, Coordinate};
-#[cfg(any(test, not(target_os = "windows")))]
+#[cfg(test)]
 use image::codecs::jpeg::JpegEncoder;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-use image::DynamicImage;
-use image::{ImageReader, Limits};
+use image::{codecs::jpeg::JpegDecoder, DynamicImage, ImageDecoder, Limits};
 #[cfg(target_os = "macos")]
 use std::collections::HashMap;
 use std::{collections::HashSet, io::Cursor};
@@ -19,6 +18,7 @@ pub struct Display {
     pub info: DesktopInfo,
 }
 
+mod jpeg;
 pub mod permissions;
 
 pub fn displays() -> Result<Vec<Display>> {
@@ -48,6 +48,8 @@ pub fn displays() -> Result<Vec<Display>> {
 pub struct Capturer {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     monitor: Monitor,
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    max_edge: u32,
     #[cfg(target_os = "windows")]
     capture: windows_capture::ScreenCapture,
     #[cfg(target_os = "macos")]
@@ -55,10 +57,17 @@ pub struct Capturer {
 }
 impl Capturer {
     pub fn open(id: u32) -> Result<Self> {
+        Self::open_with_max_edge(id, VideoProfile::Balanced.max_edge())
+    }
+    pub fn open_with_max_edge(id: u32, max_edge: u32) -> Result<Self> {
+        ensure!(
+            (1..=MAX_FRAME_EDGE).contains(&max_edge),
+            "Invalid frame edge limit"
+        );
         check_capture_permission()?;
         #[cfg(target_os = "macos")]
         return Ok(Self {
-            capture: macos_capture::ScreenCapture::open(id)?,
+            capture: macos_capture::ScreenCapture::open(id, max_edge)?,
         });
         #[cfg(target_os = "windows")]
         return Ok(Self {
@@ -67,6 +76,7 @@ impl Capturer {
                     .into_iter()
                     .find(|d| d.id == id)
                     .context("The selected display was disconnected")?,
+                max_edge,
             )?,
         });
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -75,7 +85,7 @@ impl Capturer {
                 .into_iter()
                 .find(|m| m.id().ok() == Some(id))
                 .context("The selected display was disconnected")?;
-            Ok(Self { monitor })
+            Ok(Self { monitor, max_edge })
         }
     }
 
@@ -94,10 +104,9 @@ impl Capturer {
         }
     }
     pub fn frame(&self) -> Result<Option<Message>> {
-        self.frame_with_quality(75)
+        self.frame_with_quality(VideoProfile::Balanced.max_quality())
     }
     pub fn frame_with_quality(&self, quality: u8) -> Result<Option<Message>> {
-        let quality = quality.clamp(40, 75);
         check_capture_permission()?;
         #[cfg(target_os = "windows")]
         return self.capture.frame(quality);
@@ -111,21 +120,16 @@ impl Capturer {
             #[cfg(not(target_os = "macos"))]
             let image = {
                 let rgba = self.monitor.capture_image().context("Screen capture failed. Check Screen Recording permission on macOS, or the display session on Linux")?;
-                ensure!(
-                    rgba.width() > 0 && rgba.height() > 0,
-                    "The display returned an empty image"
-                );
-                DynamicImage::ImageRgba8(rgba)
-                    .thumbnail(1600, 1600)
-                    .to_rgb8()
+                let (width, height) =
+                    crate::video::scaled_dimensions(rgba.width(), rgba.height(), self.max_edge)?;
+                let image = DynamicImage::ImageRgba8(rgba);
+                if (width, height) == (image.width(), image.height()) {
+                    image.into_rgb8()
+                } else {
+                    image.thumbnail_exact(width, height).into_rgb8()
+                }
             };
-            let mut jpeg = Vec::new();
-            JpegEncoder::new_with_quality(&mut jpeg, quality).encode_image(&image)?;
-            Ok(Some(Message::Frame {
-                width: image.width(),
-                height: image.height(),
-                jpeg,
-            }))
+            jpeg::encode_rgb(&image, quality, jpeg::BYTE_LIMIT).map(Some)
         }
     }
 }
@@ -144,25 +148,35 @@ pub struct RemoteFrame {
 
 pub fn decode_frame(width: u32, height: u32, jpeg: Vec<u8>) -> Result<RemoteFrame> {
     ensure!(
-        width > 0 && height > 0 && u64::from(width) * u64::from(height) <= MAX_FRAME_PIXELS,
+        (1..=MAX_FRAME_EDGE).contains(&width)
+            && (1..=MAX_FRAME_EDGE).contains(&height)
+            && u64::from(width) * u64::from(height) <= MAX_FRAME_PIXELS,
         "Frame dimensions exceed limit"
     );
-    let mut reader = ImageReader::with_format(Cursor::new(&jpeg), image::ImageFormat::Jpeg);
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(1600);
-    limits.max_image_height = Some(1600);
-    limits.max_alloc = Some(32 * 1024 * 1024);
-    reader.limits(limits);
-    let image = reader.decode().context("Invalid screen frame")?.to_rgb8();
+    let bytes = jpeg.len();
     ensure!(
-        image.width() == width && image.height() == height,
+        (1..=jpeg::BYTE_LIMIT).contains(&bytes),
+        "Invalid frame size"
+    );
+    let mut decoder = JpegDecoder::new(Cursor::new(jpeg)).context("Invalid screen frame")?;
+    ensure!(
+        decoder.dimensions() == (width, height),
         "Frame dimensions do not match its header"
     );
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_FRAME_EDGE);
+    limits.max_image_height = Some(MAX_FRAME_EDGE);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    limits.reserve(decoder.total_bytes())?;
+    decoder.set_limits(limits)?;
+    let image = DynamicImage::from_decoder(decoder)
+        .context("Invalid screen frame")?
+        .into_rgb8();
     Ok(RemoteFrame {
         width,
         height,
         rgb: image.into_raw(),
-        bytes: jpeg.len(),
+        bytes,
     })
 }
 
@@ -716,6 +730,82 @@ mod tests {
         assert!(require_capture_permission(true).is_ok());
     }
     #[test]
+    fn decodes_retina_width_and_rejects_both_axes_over_the_limit() {
+        for (width, height) in [(3600, 32), (32, 4096), (4097, 1), (1, 4097)] {
+            let mut jpeg = Vec::new();
+            JpegEncoder::new(&mut jpeg)
+                .encode_image(&image::RgbImage::new(width, height))
+                .unwrap();
+            let frame = decode_frame(width, height, jpeg);
+            if width <= 4096 && height <= 4096 {
+                assert_eq!(frame.unwrap().rgb.len(), (width * height * 3) as usize);
+            } else {
+                assert!(frame.is_err());
+            }
+        }
+    }
+    #[test]
+    fn noisy_frames_fit_byte_budget_and_advertise_the_actual_dimensions() {
+        use rand::{RngCore, SeedableRng};
+        let mut rgb = image::RgbImage::new(256, 192);
+        rand::rngs::StdRng::seed_from_u64(42).fill_bytes(rgb.as_mut());
+        for quality in [40, 75, 85, 90] {
+            let Message::Frame { jpeg, .. } =
+                jpeg::encode_rgb(&rgb, quality, jpeg::BYTE_LIMIT).unwrap()
+            else {
+                panic!("expected a frame");
+            };
+            let mut expected = Vec::new();
+            JpegEncoder::new_with_quality(&mut expected, quality)
+                .encode_image(&rgb)
+                .unwrap();
+            assert_eq!(
+                jpeg, expected,
+                "unconstrained frame must preserve quality {quality}"
+            );
+        }
+        for budget in [80_000, 45_000, 5000] {
+            let Message::Frame {
+                width,
+                height,
+                jpeg,
+            } = jpeg::encode_rgb(&rgb, 90, budget).unwrap()
+            else {
+                panic!("expected a frame");
+            };
+            assert!(jpeg.len() <= budget);
+            if budget == 5000 {
+                assert!(width < 256 && height < 192);
+            } else {
+                assert_eq!((width, height), (256, 192));
+            }
+            assert_eq!(width * 192, height * 256);
+            decode_frame(width, height, jpeg).unwrap();
+        }
+    }
+    #[test]
+    #[ignore = "full-size synthetic entropy stress test"]
+    fn maximum_original_noise_frame_fits_wire_budget_and_round_trips() {
+        use rand::{RngCore, SeedableRng};
+        let mut rgb = image::RgbImage::new(MAX_FRAME_EDGE, MAX_FRAME_EDGE);
+        rand::rngs::StdRng::seed_from_u64(2026).fill_bytes(rgb.as_mut());
+        let frame = jpeg::encode_rgb(&rgb, 90, jpeg::BYTE_LIMIT).unwrap();
+        frame.validate().unwrap();
+        let Message::Frame {
+            width,
+            height,
+            jpeg,
+        } = frame
+        else {
+            panic!("expected frame")
+        };
+        eprintln!(
+            "4096x4096 entropy fixture encoded as {width}x{height} in {} bytes",
+            jpeg.len()
+        );
+        decode_frame(width, height, jpeg).unwrap();
+    }
+    #[test]
     fn jpeg_dimensions_must_match_protocol_header() {
         let mut jpeg = Vec::new();
         JpegEncoder::new(&mut jpeg)
@@ -727,7 +817,8 @@ mod tests {
     }
     #[test]
     fn rejects_invalid_images_and_large_dimensions() {
-        assert!(decode_frame(1601, 1600, vec![1]).is_err());
+        assert!(decode_frame(4097, 1, vec![1]).is_err());
+        assert!(decode_frame(0, 1, vec![1]).is_err());
         assert!(decode_frame(1, 1, vec![0; 16]).is_err());
     }
 }

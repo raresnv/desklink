@@ -1,9 +1,11 @@
 //! Bounded DXGI capture with scaled GDI initialization fallback.
 //! WIC scales and encodes native BGR rows without Rust pixel transforms.
+use super::jpeg;
 use super::windows_duplication::{Duplication, RawFrame};
 use crate::{
     desktop::Display,
-    protocol::{Message, MAX_MESSAGE},
+    protocol::Message,
+    video::{scaled_dimensions, MAX_FRAME_PIXELS},
 };
 use anyhow::{ensure, Context, Result};
 use std::{ffi::c_void, ptr};
@@ -50,15 +52,10 @@ impl Drop for Surface {
     }
 }
 impl Surface {
-    fn open(display: Display) -> Result<Self> {
-        Self::open_scaled(display, 1600)
-    }
     fn open_scaled(display: Display, bound: u32) -> Result<Self> {
         unsafe {
-            let scale =
-                (bound as f64 / display.info.width.max(display.info.height) as f64).min(1.0);
-            let width = (display.info.width as f64 * scale).round().max(1.0) as u32;
-            let height = (display.info.height as f64 * scale).round().max(1.0) as u32;
+            let (width, height) =
+                scaled_dimensions(display.info.width, display.info.height, bound)?;
             let stride = width * 4;
             let mut surface = Self {
                 screen: GetDC(None),
@@ -190,11 +187,12 @@ pub(super) struct ScreenCapture {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
     duplication_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    max_edge: u32,
     factory: IWICImagingFactory,
     _apartment: ComApartment,
 }
 impl ScreenCapture {
-    pub fn open(display: Display) -> Result<Self> {
+    pub fn open(display: Display, max_edge: u32) -> Result<Self> {
         let apartment = ComApartment::open()?;
         let factory =
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }?;
@@ -223,7 +221,7 @@ impl ScreenCapture {
                     };
                     backend.store(duplication.is_some(), std::sync::atomic::Ordering::Release);
                     let fallback = if duplication.is_none() {
-                        Some(Surface::open(display.clone())?)
+                        Some(Surface::open_scaled(display.clone(), max_edge)?)
                     } else {
                         None
                     };
@@ -285,6 +283,7 @@ impl ScreenCapture {
             stop,
             worker: Some(worker),
             duplication_active,
+            max_edge,
             factory,
             _apartment: apartment,
         })
@@ -318,20 +317,16 @@ impl ScreenCapture {
         drop(slot);
         let width = raw.width;
         let height = raw.height;
-        let (encoded_width, encoded_height) = output_size(width, height);
-        let jpeg = encode(
+        encode(
             &self.factory,
             width,
             height,
             width * 4,
             &raw.pixels,
+            self.max_edge,
             quality,
-        )?;
-        Ok(Some(Message::Frame {
-            width: encoded_width,
-            height: encoded_height,
-            jpeg,
-        }))
+        )
+        .map(Some)
     }
 }
 impl Drop for ScreenCapture {
@@ -343,55 +338,25 @@ impl Drop for ScreenCapture {
         }
     }
 }
-fn output_size(width: u32, height: u32) -> (u32, u32) {
-    let scale = (1600.0 / width.max(height) as f64).min(1.0);
-    (
-        (width as f64 * scale).round().max(1.0) as u32,
-        (height as f64 * scale).round().max(1.0) as u32,
-    )
-}
 fn encode(
     factory: &IWICImagingFactory,
     width: u32,
     height: u32,
     stride: u32,
     pixels: &[u8],
+    max_edge: u32,
     quality: u8,
-) -> Result<Vec<u8>> {
+) -> Result<Message> {
     unsafe {
         ensure!(
             width > 0
                 && height > 0
-                && u64::from(width) * u64::from(height) <= 16_777_216
+                && u64::from(width) * u64::from(height) <= MAX_FRAME_PIXELS
                 && stride == width * 4
                 && pixels.len() == stride as usize * height as usize,
             "Invalid native JPEG pixels"
         );
-        let stream = CreateStreamOnHGlobal(HGLOBAL::default(), true)?;
-        let encoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, ptr::null())?;
-        encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
-        let (mut frame, mut options) = (None, None);
-        encoder.CreateNewFrame(&mut frame, &mut options)?;
-        let frame = frame.context("JPEG encoder did not create a frame")?;
-        let options = options.context("JPEG encoder options unavailable")?;
-        let quality_option = PROPBAG2 {
-            pstrName: PWSTR(w!("ImageQuality").as_ptr() as *mut _),
-            ..Default::default()
-        };
-        options.Write(
-            1,
-            &quality_option,
-            &VARIANT::from(quality.clamp(40, 75) as f32 / 100.0),
-        )?;
-        frame.Initialize(&options)?;
-        let (encoded_width, encoded_height) = output_size(width, height);
-        frame.SetSize(encoded_width, encoded_height)?;
-        let mut format = GUID_WICPixelFormat24bppBGR;
-        frame.SetPixelFormat(&mut format)?;
-        ensure!(
-            format == GUID_WICPixelFormat24bppBGR,
-            "Unsupported native JPEG pixel format"
-        );
+        let dimensions = scaled_dimensions(width, height, max_edge)?;
         let bitmap = factory.CreateBitmapFromMemory(
             width,
             height,
@@ -408,32 +373,72 @@ fn encode(
             0.0,
             WICBitmapPaletteTypeCustom,
         )?;
-        if width != encoded_width || height != encoded_height {
+        jpeg::encode_bounded(dimensions, quality, |size, quality| {
+            encode_at(factory, &converter, (width, height), size, quality)
+        })
+    }
+}
+
+fn encode_at(
+    factory: &IWICImagingFactory,
+    converter: &IWICFormatConverter,
+    source: (u32, u32),
+    size: (u32, u32),
+    quality: u8,
+) -> Result<Option<Vec<u8>>> {
+    unsafe {
+        let stream = CreateStreamOnHGlobal(HGLOBAL::default(), true)?;
+        let encoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, ptr::null())?;
+        encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
+        let (mut frame, mut options) = (None, None);
+        encoder.CreateNewFrame(&mut frame, &mut options)?;
+        let frame = frame.context("JPEG encoder did not create a frame")?;
+        let options = options.context("JPEG encoder options unavailable")?;
+        let quality_option = PROPBAG2 {
+            pstrName: PWSTR(w!("ImageQuality").as_ptr() as *mut _),
+            ..Default::default()
+        };
+        options.Write(
+            1,
+            &quality_option,
+            &VARIANT::from(f32::from(quality) / 100.0),
+        )?;
+        frame.Initialize(&options)?;
+        let (encoded_width, encoded_height) = size;
+        frame.SetSize(encoded_width, encoded_height)?;
+        let mut format = GUID_WICPixelFormat24bppBGR;
+        frame.SetPixelFormat(&mut format)?;
+        ensure!(
+            format == GUID_WICPixelFormat24bppBGR,
+            "Unsupported native JPEG pixel format"
+        );
+        // WIC scales and reads the original bitmap for every candidate.
+        if source != size {
             let scaler = factory.CreateBitmapScaler()?;
             scaler.Initialize(
-                &converter,
+                converter,
                 encoded_width,
                 encoded_height,
                 WICBitmapInterpolationModeNearestNeighbor,
             )?;
             frame.WriteSource(&scaler, ptr::null())?;
         } else {
-            frame.WriteSource(&converter, ptr::null())?;
+            frame.WriteSource(converter, ptr::null())?;
         }
         frame.Commit()?;
         encoder.Commit()?;
         let mut stat = STATSTG::default();
         stream.Stat(&mut stat, STATFLAG_NONAME)?;
-        ensure!(
-            stat.cbSize > 0 && stat.cbSize < (MAX_MESSAGE - 128) as u64,
-            "Native JPEG exceeds frame limit"
-        );
+        ensure!(stat.cbSize > 0, "Empty native JPEG");
+        if stat.cbSize > jpeg::BYTE_LIMIT as u64 {
+            return Ok(None);
+        }
         let handle = GetHGlobalFromStream(&stream)?;
         let data = GlobalLock(handle);
         ensure!(!data.is_null(), "Cannot read encoded JPEG");
         let jpeg = std::slice::from_raw_parts(data.cast::<u8>(), stat.cbSize as usize).to_vec();
         let _ = GlobalUnlock(handle);
-        Ok(jpeg)
+        Ok(Some(jpeg))
     }
 }
 
@@ -454,7 +459,7 @@ mod tests {
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
                 .unwrap();
         let display = crate::desktop::displays().unwrap().remove(0);
-        for bound in [1600, display.info.width.max(display.info.height)] {
+        for bound in [1600, crate::video::MAX_FRAME_EDGE] {
             let surface = Surface::open_scaled(display.clone(), bound).unwrap();
             let mut capture_ms = Vec::new();
             let mut encode_ms = Vec::new();
@@ -470,6 +475,7 @@ mod tests {
                         surface.height,
                         surface.stride,
                         pixels,
+                        bound,
                         60,
                     )
                     .unwrap();
@@ -504,13 +510,25 @@ mod tests {
                 });
             }
         }
-        let jpeg = encode(&factory, width, height, width * 4, &pixels, 60).unwrap();
-        let (w, h) = output_size(width, height);
-        assert_eq!((w, h), (1600, 95));
-        let image = crate::desktop::decode_frame(w, h, jpeg).unwrap();
-        assert!(image.rgb[3 * (8 * w + 8) as usize] > 220);
-        assert!(image.rgb[3 * ((h - 8) * w + 8) as usize + 2] > 220);
-        assert!(encode(&factory, 32768, 32768, 131072, &[], 60).is_err());
+        for (bound, quality, expected) in [
+            (1600, 75, (1600, 95)),
+            (2560, 85, (1701, 101)),
+            (4096, 90, (1701, 101)),
+        ] {
+            let Message::Frame {
+                width: w,
+                height: h,
+                jpeg,
+            } = encode(&factory, width, height, width * 4, &pixels, bound, quality).unwrap()
+            else {
+                panic!("expected a frame");
+            };
+            assert_eq!((w, h), expected);
+            let image = crate::desktop::decode_frame(w, h, jpeg).unwrap();
+            assert!(image.rgb[3 * (8 * w + 8) as usize] > 220);
+            assert!(image.rgb[3 * ((h - 8) * w + 8) as usize + 2] > 220);
+        }
+        assert!(encode(&factory, 32768, 32768, 131072, &[], 2560, 85).is_err());
     }
     #[test]
     fn native_jpeg_preserves_channels_odd_dimensions_and_row_order() {
@@ -531,7 +549,11 @@ mod tests {
                 pixels[offset..offset + 4].copy_from_slice(&bgr);
             }
         }
-        let jpeg = encode(&factory, width, height, width * 4, &pixels, 75).unwrap();
+        let Message::Frame { jpeg, .. } =
+            encode(&factory, width, height, width * 4, &pixels, 4096, 90).unwrap()
+        else {
+            panic!("expected a frame");
+        };
         let frame = crate::desktop::decode_frame(width, height, jpeg).unwrap();
         let top = &frame.rgb[((8 * width + 8) * 3) as usize..][..3];
         let bottom = &frame.rgb[(((height - 8) * width + 8) * 3) as usize..][..3];
@@ -543,6 +565,7 @@ mod tests {
             height,
             width * 4,
             &pixels[..pixels.len() - 1],
+            1600,
             75
         )
         .is_err());
