@@ -1,4 +1,5 @@
 use crate::protocol::{self, Message, MAX_MESSAGE, VERSION};
+use crate::video::{VideoProfile, VIDEO_CAPABILITY_MARKER};
 use crate::wire::Wire;
 use anyhow::{ensure, Context, Result};
 use snow::{Builder, TransportState};
@@ -16,6 +17,7 @@ type Cipher = Arc<Mutex<TransportState>>;
 pub struct SecureConnection {
     stream: Wire,
     cipher: Cipher,
+    supports_video_settings: bool,
 }
 pub struct SecureReader {
     stream: Wire,
@@ -25,6 +27,7 @@ pub struct SecureReader {
 pub struct SecureWriter {
     stream: Wire,
     cipher: Cipher,
+    supports_video_settings: bool,
 }
 
 impl SecureConnection {
@@ -95,36 +98,32 @@ impl SecureConnection {
         let mut output = [0; 4096];
         let deadline = Instant::now() + Duration::from_secs(8);
         if initiator {
-            let n = noise.write_message(&[], &mut output)?;
+            let n = noise.write_message(VIDEO_CAPABILITY_MARKER, &mut output)?;
             write_packet(&mut stream, &output[..n])?;
-            let packet = read_packet(
-                &mut DeadlineReader {
-                    stream: &mut stream,
-                    deadline,
-                },
-                4096,
-            )?;
-            noise.read_message(&packet, &mut output).context(
-                "Host authentication failed; verify the computer identity or invitation",
-            )?;
-        } else {
-            let packet = read_packet(
-                &mut DeadlineReader {
-                    stream: &mut stream,
-                    deadline,
-                },
-                4096,
-            )?;
-            noise
-                .read_message(&packet, &mut output)
-                .context("Invalid pairing key or computer identity")?;
+        }
+        let packet = read_packet(
+            &mut DeadlineReader {
+                stream: &mut stream,
+                deadline,
+            },
+            output.len(),
+        )?;
+        let payload_len = noise
+            .read_message(&packet, &mut output)
+            .context(if initiator {
+                "Host authentication failed; verify the computer identity or invitation"
+            } else {
+                "Invalid pairing key or computer identity"
+            })?;
+        let supports_video_settings = &output[..payload_len] == VIDEO_CAPABILITY_MARKER;
+        if !initiator {
             if let Some(expected) = remote {
                 ensure!(
                     noise.get_remote_static() == Some(expected.as_slice()),
                     "Request came from a different computer identity"
                 );
             }
-            let n = noise.write_message(&[], &mut output)?;
+            let n = noise.write_message(VIDEO_CAPABILITY_MARKER, &mut output)?;
             write_packet(&mut stream, &output[..n])?;
         }
         ensure!(noise.is_handshake_finished(), "Incomplete Noise handshake");
@@ -137,7 +136,12 @@ impl SecureConnection {
         Ok(Self {
             stream,
             cipher: Arc::new(Mutex::new(noise.into_transport_mode()?)),
+            supports_video_settings,
         })
+    }
+
+    pub fn supports_video_settings(&self) -> bool {
+        self.supports_video_settings
     }
 
     pub fn split(self) -> Result<(SecureReader, SecureWriter)> {
@@ -150,6 +154,7 @@ impl SecureConnection {
             SecureWriter {
                 stream: self.stream,
                 cipher: self.cipher,
+                supports_video_settings: self.supports_video_settings,
             },
         ))
     }
@@ -187,6 +192,16 @@ impl SecureReader {
 
 impl SecureWriter {
     pub fn send(&mut self, message: &Message) -> Result<()> {
+        if !self.supports_video_settings {
+            match message {
+                Message::VideoSettings(_) => anyhow::bail!("Peer does not support video settings"),
+                Message::Frame { width, height, .. } => ensure!(
+                    (*width).max(*height) <= VideoProfile::Balanced.max_edge(),
+                    "Frame exceeds legacy peer limit"
+                ),
+                _ => {}
+            }
+        }
         send_encrypted(&mut self.stream, &self.cipher, &protocol::encode(message)?)
     }
 }

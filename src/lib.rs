@@ -4,6 +4,7 @@ pub mod invitation;
 pub mod protocol;
 pub mod relay;
 pub mod transport;
+pub mod video;
 pub mod wire;
 
 #[cfg(feature = "desktop")]

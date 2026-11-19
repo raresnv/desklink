@@ -1,9 +1,10 @@
+pub use crate::video::MAX_FRAME_PIXELS;
+use crate::video::{VideoProfile, MAX_FRAME_EDGE};
 use anyhow::{ensure, Context, Result};
 use bincode::Options;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_MESSAGE: usize = 8 * 1024 * 1024;
-pub const MAX_FRAME_PIXELS: u64 = 1600 * 1600;
 pub const VERSION: &[u8] = b"DeskLink-v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +113,7 @@ pub enum Message {
     Pong(u64),
     Error(String),
     Disconnect,
+    VideoSettings(VideoProfile),
 }
 
 impl Message {
@@ -128,8 +130,8 @@ impl Message {
                 jpeg,
             } => {
                 ensure!(
-                    *width > 0
-                        && *height > 0
+                    (1..=MAX_FRAME_EDGE).contains(width)
+                        && (1..=MAX_FRAME_EDGE).contains(height)
                         && u64::from(*width) * u64::from(*height) <= MAX_FRAME_PIXELS,
                     "Invalid frame dimensions"
                 );
