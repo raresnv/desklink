@@ -9,6 +9,8 @@ implied. No paid signing subscription has been selected as a replacement.
 
 Mac signing is separate: the Mac 0.3.3 preview is Developer ID signed by
 Overtex Core Solutions SRL, Apple notarized and includes its stapled ticket.
+The default Mac download is a separately signed/notarized DMG with its own
+stapled ticket. See [the DMG release record](docs/MAC-DMG-0.3.3.md).
 Windows publisher signing is not configured. See each public download's actual
 version and signing status.
 

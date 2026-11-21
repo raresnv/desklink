@@ -78,3 +78,10 @@ Private evidence: `.tools/sharp-video/` reports and logs;
 `dist/production/0.3.3/macos-release-r1.json` and
 `publication-verification-r1.json`. No actual screen images are saved by the
 real-screen test client; viewer screenshots contain only generated fixture pixels.
+
+## DMG distribution update — 21 November 2026
+
+The default public Mac link now selects a separately signed, notarized and
+stapled DMG containing the unchanged app. The previous ZIP is retained at its
+immutable URL. See [the DMG release record](MAC-DMG-0.3.3.md) for the new
+container hash, Apple receipt, installation checks and rollback details.

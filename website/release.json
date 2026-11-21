@@ -1,10 +1,10 @@
 {
   "version": "0.3.3",
   "channel": "public preview",
-  "date": "2026-11-19",
+  "date": "2026-11-21",
   "production_ready": false,
   "signing": {
-    "macos": "Developer ID signed by Overtex Core Solutions SRL; Apple notarized with a stapled ticket.",
+    "macos": "App and DMG Developer ID signed by Overtex Core Solutions SRL; both Apple notarized with stapled tickets.",
     "windows": "Unsigned preview; publisher signing is not configured. The SignPath Foundation application was not approved."
   },
   "packages": [
@@ -13,15 +13,19 @@
       "platform": "macos",
       "version": "0.3.3",
       "architecture": "Apple Silicon / ARM64",
-      "format": "ZIP",
-      "bytes": 6736445,
-      "sha256": "bcf9ef4685ed659db21f88f3e738d6c2433c89265f9d92fd12424ff37ea92039",
+      "format": "DMG",
+      "bytes": 7419712,
+      "sha256": "1c8dc82ce99e696120c11aea1554f586d5b66eef37a57e0fac636d671418dad9",
       "executable_sha256": "ecca4202abc9323bff8fce5bcfecde19e290b7b2364476bdc24805f850295ba8",
-      "url": "/downloads/0.3.3/DeskLink-0.3.3-macos-arm64-r1.zip",
+      "url": "/downloads/0.3.3/DeskLink-0.3.3-macos-arm64.dmg",
       "publisher": "Overtex Core Solutions SRL",
       "developer_id_signed": true,
       "notarized": true,
-      "ticket_stapled": true
+      "ticket_stapled": true,
+      "disk_image_signed": true,
+      "disk_image_notarized": true,
+      "disk_image_ticket_stapled": true,
+      "notary_submission_id": "4ce1f8ec-ef62-4600-b7ba-907aef65e7b1"
     },
     {
       "id": "windows",
@@ -65,7 +69,7 @@
   "version_note": "Mac and Windows 0.3.3 quality previews; Linux remains 0.3.1. Windows previews are unsigned.",
   "checksums_url": "/SHA256SUMS.txt",
   "verification": {
-    "macos": "Exact public archive and executable, launch permission, Developer ID/Apple ticket/Gatekeeper, protected launch and same-ID public presence verified. Downloaded viewer profile/zoom/panning passed with generated public-relay frames. Downloaded host real-screen view-only test through the public relay to a local client: Balanced 1600x1039 46.80 fps, Sharp 2560x1663 34.19 fps, Original 3600x2338 18.60 fps in five-second measurement windows. Full two-way input, fresh permission onboarding and second physical Mac checks remain pending.",
+    "macos": "DMG packaging update: exact public disk image, company Developer ID signatures, Apple acceptance and stapled tickets for DMG and contained app, Gatekeeper, read-only mount, executable permission, unchanged app hash and Applications shortcut verified. The application remains the same 0.3.3/build 9 as the earlier ZIP. Earlier 0.3.3 downloaded-app viewer quality/zoom/panning passed with generated public-relay frames; real-screen view-only test to a local client measured Balanced 1600x1039 46.80 fps, Sharp 2560x1663 34.19 fps, Original 3600x2338 18.60 fps in short measurement windows. Full two-way input, fresh permission onboarding and second physical Mac checks remain pending.",
     "windows": "Windows x64 GitHub Actions build and native ARM64 build verified. All 44 native Windows unit tests passed (3 ignored), including WIC JPEG decoding. Native ARM64 DXGI capture/encode/decode passed at Balanced 1600x919, Sharp 2560x1471 and Original 3600x2068 in a Windows 11 ARM VM; this is a static-desktop diagnostic, not an end-to-end frame-rate benchmark. Exact public archives, executables and version metadata verified in Windows. Full two-way input on 0.3.3 remains pending. Both builds are unsigned; ARM64 is experimental."
   }
 }
