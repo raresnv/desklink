@@ -3,6 +3,8 @@ Unicode true
 !include "LogicLib.nsh"
 !include "WinVer.nsh"
 !include "x64.nsh"
+!define MUI_ICON "${APP_ICON}"
+!define MUI_UNICON "${APP_ICON}"
 
 !define PRODUCT_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DeskLink"
 !define PRODUCT_ID "dev.desklink.desktop.per-user"

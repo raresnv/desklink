@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>DeskLink — linked screens</title>
+  <rect x="48" y="48" width="928" height="928" rx="210" fill="#145f4d"/>
+  <rect x="218" y="272" width="420" height="312" rx="62" fill="#145f4d" stroke="#c5e3a1" stroke-width="48"/>
+  <rect x="362" y="432" width="420" height="312" rx="62" fill="#145f4d" stroke="#f7f8f2" stroke-width="48"/>
+</svg>

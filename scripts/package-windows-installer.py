@@ -98,6 +98,7 @@ def main():
         install_include.write_text('\n'.join(install_lines)+'\n', encoding='utf-8')
         delete_include.write_text('\n'.join(delete_lines)+'\n', encoding='utf-8')
         command = [compiler, '-V3', f'-DVERSION={version}', f'-DARCH={args.arch}',
+                   f'-DAPP_ICON={root / "assets/icons/desklink.ico"}',
                    f'-DOUTPUT={installer}', f'-DINSTALL_FILES={install_include}',
                    f'-DUNINSTALL_FILES={delete_include}',
                    f'-DINSTALLED_KB={(sum(f.stat().st_size for f in files)+1023)//1024}',
