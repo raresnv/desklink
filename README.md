@@ -16,7 +16,9 @@ Public Mac downloads are now version 0.3.3 preview, Developer ID signed by Overt
 Core Solutions SRL and notarized by Apple with a stapled ticket. The default Mac
 download is now a signed, notarized DMG with an Applications shortcut; see the
 [DMG release record](docs/MAC-DMG-0.3.3.md). Windows x64 and
-experimental ARM64 downloads are also 0.3.3 previews; Linux remains 0.3.1. The
+experimental ARM64 downloads are also 0.3.3 previews, now using per-user EXE
+installers with portable ZIP alternatives. See the
+[installer release record](docs/WINDOWS-INSTALLER-0.3.3.md). Linux remains 0.3.1. The
 SignPath Foundation application was not approved; Windows publisher signing
 is not configured. Existing Windows downloads are unsigned; do not
 assume a local build or CI artifact is publisher signed.
@@ -93,8 +95,9 @@ codes for a public deployment.
 ## Permissions, installation and removal
 
 On Mac, open the DMG, drag DeskLink.app onto its Applications shortcut, eject
-the image and open DeskLink from Applications. On Windows, extract the full
-ZIP package and open desklink.exe. On Linux,
+the image and open DeskLink from Applications. On Windows, run the
+setup EXE and open DeskLink from the Start menu. Portable ZIP downloads can
+also be extracted and run with desklink.exe. On Linux,
 use the documented X11 desktop and runtime libraries.
 
 macOS Screen Recording is required to share a display, and Accessibility is

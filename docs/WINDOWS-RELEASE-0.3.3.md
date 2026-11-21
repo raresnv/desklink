@@ -68,3 +68,10 @@ The relay was not restarted. Rollback can restore those four files without
 changing the immutable archives. Temporary capture/launch tasks and test app
 processes were removed; the Windows VM was returned to its original suspended
 state. The private transfer server was stopped.
+
+## Installer distribution update — 21 November 2026
+
+The default x64 and experimental ARM64 links now select per-user unsigned EXE
+installers. The app executables are unchanged and these ZIPs remain portable
+alternatives. See [the installer record](WINDOWS-INSTALLER-0.3.3.md) for hashes,
+installation/removal checks, the shortcut fix and remaining verification limits.

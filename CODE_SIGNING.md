@@ -4,7 +4,7 @@
 
 The SignPath Foundation application was not approved on 19 November 2026.
 DeskLink has no Foundation certificate or active Foundation signing relationship.
-Windows previews remain unsigned. No endorsement or code-signing service is
+Windows installers, app executables and uninstallers remain unsigned previews. No endorsement or code-signing service is
 implied. No paid signing subscription has been selected as a replacement.
 
 Mac signing is separate: the Mac 0.3.3 preview is Developer ID signed by
