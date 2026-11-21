@@ -15,6 +15,8 @@ fn main() {
         let status = Command::new("rc.exe")
             .arg("/nologo")
             .arg("/I")
+            .arg(root.join("packaging/windows"))
+            .arg("/I")
             .arg(root.join("assets/icons"))
             .arg("/fo")
             .arg(&output)
