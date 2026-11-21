@@ -1,6 +1,6 @@
-1c8dc82ce99e696120c11aea1554f586d5b66eef37a57e0fac636d671418dad9  DeskLink-0.3.3-macos-arm64.dmg
-72762d82c4657ddc82ee864af35fd75199b3c01198fbac2f0a96663879b8b7b8  DeskLink-0.3.3-windows-x64-setup.exe
+5daf95ecbe4c19d73b69d7d2762a303045aa61f264c4ae6f49f76116442c15b4  DeskLink-0.3.4-macos-arm64.dmg
+6f048c2094adf7d141b3317ca0f7dd5f9e0dc126c4ad512548de4278b8e319bd  DeskLink-0.3.4-windows-x64-setup.exe
 ca841d1b63833cdaf2053c61834d8e24056e592cc2a4c1a071daa2ffbeb9a130  DeskLink-0.3.1-linux-arm64.tar.gz
-9d1075ffd63e7c8b93c9bcefb878df0aeae027a7f4bf50e72b89fd9c80be17cd  DeskLink-0.3.3-windows-arm64-setup.exe
-43789092ab43082127a3303669b10d3acc371017f06ec215bf15c8cc5949292a  DeskLink-0.3.3-windows-x64.zip
-b1b4e3d0318f96c2ef436858fbd501211fd66c8685e2f6ef1eb440b32927c541  DeskLink-0.3.3-windows-arm64.zip
+6e1cb9b2df132e1ebdda9baeb70a98ac2f896034fd9aaac314ff7f1604541e00  DeskLink-0.3.4-windows-arm64-setup.exe
+5e32c94df37ef5f3aef1557792f186f22182e8fc469d1d0332da74c1a59555dc  DeskLink-0.3.4-windows-x64.zip
+20c393c050004b85d83004519fc4b4bd7da1ba1badd4df189afe9208a4453c40  DeskLink-0.3.4-windows-arm64.zip

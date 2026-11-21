@@ -12,32 +12,24 @@ approves viewing or keyboard/mouse control for every session.
 
 ## Release status
 
-Public Mac downloads are now version 0.3.3 preview, Developer ID signed by Overtex
-Core Solutions SRL and notarized by Apple with a stapled ticket. The default Mac
-download is now a signed, notarized DMG with an Applications shortcut; see the
-[DMG release record](docs/MAC-DMG-0.3.3.md). Windows x64 and
-experimental ARM64 downloads are also 0.3.3 previews, now using per-user EXE
-installers with portable ZIP alternatives. See the
-[installer release record](docs/WINDOWS-INSTALLER-0.3.3.md). Linux remains 0.3.1. The
-SignPath Foundation application was not approved; Windows publisher signing
-is not configured. Existing Windows downloads are unsigned; do not
-assume a local build or CI artifact is publisher signed.
+Mac and Windows downloads are now **0.3.4 previews** with the linked-screen
+DeskLink icon. Mac app/DMG are Developer ID signed by Overtex Core Solutions SRL,
+Apple notarized and stapled. Windows x64 and experimental ARM64 installers, apps
+and uninstallers remain unsigned; portable ZIPs are available. Linux remains
+0.3.1. The SignPath Foundation application was not approved and Windows publisher
+signing is not configured.
 
-The 0.3.1 Mac and Windows previews were exercised for screen sharing and input in
-both directions through the public relay using a Mac and Windows 11 ARM VM running
-Windows x64 under emulation. The exact downloaded signed Mac 0.3.3 package passes
-signature, executable-permission, notarization-ticket and Gatekeeper checks; it opens under downloaded-
-file protection and connects to the public relay. Full two-way input and fresh
-permission-onboarding checks on this signed build remain pending. Its downloaded viewer passed live quality switching, Fit, 100% zoom and panning through the public relay with generated images. A short real-screen, view-only test of the downloaded Mac host through the public relay to a local client measured about 34 fps in Sharp (2560 × 1663) and 19 fps in Original (3600 × 2338). An updated second physical Mac remains unchecked. These checks do
-not establish physical Windows x64, production-scale capacity or every network/
-DPI configuration. Linux targets ARM64/X11; Wayland control is unsupported.
+The 0.3.4 Mac build passed 49 library tests and Apple trust checks. Mac Finder
+and native Windows file-icon checks verified the custom artwork; all public
+files were downloaded back and hash/version checked. The running Windows 0.3.3
+installation was preserved. Full 0.3.4 screen sharing, input and fresh permission
+onboarding were not retested. See the [icon release record](docs/APP-ICON-0.3.4.md).
+Earlier records: [Mac DMG](docs/MAC-DMG-0.3.3.md),
+[Windows installers](docs/WINDOWS-INSTALLER-0.3.3.md), and
+[stream quality](docs/SHARP-VIDEO-0.3.3.md). These checks do not establish
+production-scale capacity or every network/display configuration.
 
-Windows 0.3.3 passed 44 native unit tests, ARM64 capture/decoding at all three
-quality modes, exact public-download hash/version checks and process launch with
-a public-relay TCP connection. These do not establish a full GUI or two-way input
-retest. See the [Windows release record](docs/WINDOWS-RELEASE-0.3.3.md).
-
-## Stream quality (source version 0.3.3)
+## Stream quality
 
 Updated pairs start with Sharp, up to 2560 pixels on the longest edge. The viewer
 can switch to Balanced (1600) or Original / Retina (up to 4096), and choose Fit
